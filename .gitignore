@@ -1,0 +1,20 @@
+.vs/
+**/.vs/
+**/bin/
+**/obj/
+
+# User-specific and local secret files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.pfx
+*.pem
+*.key
+.env
+.env.*
+
+# Local configuration and secrets
+**/appsettings.Development.json
+**/appsettings.Local.json
+**/secrets.json
