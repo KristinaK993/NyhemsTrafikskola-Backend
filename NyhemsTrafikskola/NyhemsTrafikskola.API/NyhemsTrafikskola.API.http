@@ -1,0 +1,6 @@
+@NyhemsTrafikskola.API_HostAddress = http://localhost:5055
+
+GET {{NyhemsTrafikskola.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
