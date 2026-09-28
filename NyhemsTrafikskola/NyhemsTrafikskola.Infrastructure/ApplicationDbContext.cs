@@ -13,6 +13,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
 
     public DbSet<StudentProfile> StudentProfiles => Set<StudentProfile>();
     public DbSet<InstructorProfile> InstructorProfiles => Set<InstructorProfile>();
+    public DbSet<Course> Courses => Set<Course>();
+    public DbSet<CourseSession> CourseSessions => Set<CourseSession>();
+    public DbSet<CourseBooking> CourseBookings => Set<CourseBooking>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -74,6 +77,75 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
 
             entity.HasIndex(x => new { x.UserId, x.Email })
                 .IsUnique();
+        });
+
+        builder.Entity<Course>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Title)
+                .HasMaxLength(200)
+                .IsRequired();
+            entity.Property(x => x.Price)
+                .HasColumnType("decimal(18,2)")
+                .IsRequired();
+            entity.Property(x => x.IsActive)
+                .HasDefaultValue(true);
+
+            entity.HasIndex(x => x.Type);
+            entity.HasIndex(x => x.IsActive);
+        });
+
+        builder.Entity<CourseSession>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.StartTime)
+                .IsRequired();
+            entity.Property(x => x.EndTime)
+                .IsRequired();
+            entity.Property(x => x.Capacity)
+                .IsRequired();
+            entity.Property(x => x.IsPublished)
+                .HasDefaultValue(false);
+
+            entity.HasIndex(x => x.CourseId);
+            entity.HasIndex(x => new { x.CourseId, x.StartTime });
+            entity.HasOne<Course>()
+                .WithMany()
+                .HasForeignKey(x => x.CourseId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<CourseBooking>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.CustomerName)
+                .HasMaxLength(200)
+                .IsRequired();
+            entity.Property(x => x.Email)
+                .HasMaxLength(200)
+                .IsRequired();
+            entity.Property(x => x.Phone)
+                .HasMaxLength(50)
+                .IsRequired();
+            entity.Property(x => x.Status)
+                .IsRequired();
+            entity.Property(x => x.CreatedAt)
+                .IsRequired();
+
+            entity.HasIndex(x => x.CourseSessionId);
+            entity.HasIndex(x => x.StudentProfileId);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => new { x.CourseSessionId, x.Status });
+
+            entity.HasOne<CourseSession>()
+                .WithMany()
+                .HasForeignKey(x => x.CourseSessionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<StudentProfile>()
+                .WithMany()
+                .HasForeignKey(x => x.StudentProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<StudentProfile>()
