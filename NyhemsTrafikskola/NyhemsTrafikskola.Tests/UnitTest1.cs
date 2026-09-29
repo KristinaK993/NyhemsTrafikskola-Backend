@@ -41,6 +41,8 @@ public class StudentAndInstructorRequirementsTests
         Assert.Multiple(() =>
         {
             Assert.That(RegistrationPermissions.CanSelfRegister(studentRoles), Is.True);
+            Assert.That(RegistrationPermissions.CanSelfRegister([ApplicationRoles.Student, ApplicationRoles.Admin]), Is.False);
+            Assert.That(RegistrationPermissions.CanSelfRegister([ApplicationRoles.Student, ApplicationRoles.Instructor]), Is.False);
             Assert.That(RegistrationPermissions.CanSelfRegister(instructorAndAdminRoles), Is.False);
             Assert.That(RegistrationPermissions.CanRegisterStudent(studentRoles), Is.True);
             Assert.That(RegistrationPermissions.CanRegisterStudent(instructorAndAdminRoles), Is.True);

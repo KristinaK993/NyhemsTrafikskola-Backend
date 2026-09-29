@@ -12,7 +12,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using NyhemsTrafikskola.API;
+using NyhemsTrafikskola.Application.Administration;
 using NyhemsTrafikskola.Application.Authorization;
+using NyhemsTrafikskola.Domain;
 using NyhemsTrafikskola.Infrastructure;
 using NyhemsTrafikskola.Infrastructure.Auth;
 
@@ -29,12 +31,13 @@ public class AuthIntegrationTests
             AllowAutoRedirect = false,
         });
 
-        await factory.SeedUserAsync("student@example.com", "Password123!", ApplicationRoles.Student);
+        var password = NewTestPassword();
+        await factory.SeedUserAsync("student@example.com", password, ApplicationRoles.Student);
 
         var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new
         {
             email = "student@example.com",
-            password = "Password123!",
+            password,
         });
 
         Assert.That(loginResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
@@ -78,12 +81,13 @@ public class AuthIntegrationTests
             AllowAutoRedirect = false,
         });
 
-        await factory.SeedUserAsync("student@example.com", "Password123!", ApplicationRoles.Student);
+        await factory.SeedUserAsync("student@example.com", NewTestPassword(), ApplicationRoles.Student);
+        var incorrectPassword = NewTestPassword();
 
         var response = await client.PostAsJsonAsync("/api/auth/login", new
         {
             email = "student@example.com",
-            password = "WrongPassword!",
+            password = incorrectPassword,
         });
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
@@ -112,12 +116,13 @@ public class AuthIntegrationTests
             AllowAutoRedirect = false,
         });
 
-        await factory.SeedUserAsync("student@example.com", "Password123!", ApplicationRoles.Student);
+        var password = NewTestPassword();
+        await factory.SeedUserAsync("student@example.com", password, ApplicationRoles.Student);
 
         var login = await client.PostAsJsonAsync("/api/auth/login", new
         {
             email = "student@example.com",
-            password = "Password123!",
+            password,
         });
 
         Assert.That(login.StatusCode, Is.EqualTo(HttpStatusCode.OK));
@@ -142,12 +147,13 @@ public class AuthIntegrationTests
             AllowAutoRedirect = false,
         });
 
-        await factory.SeedUserAsync("student@example.com", "Password123!", ApplicationRoles.Student);
+        var password = NewTestPassword();
+        await factory.SeedUserAsync("student@example.com", password, ApplicationRoles.Student);
 
         await client.PostAsJsonAsync("/api/auth/login", new
         {
             email = "student@example.com",
-            password = "Password123!",
+            password,
         });
 
         var me = await client.GetAsync("/api/auth/me");
@@ -163,9 +169,10 @@ public class AuthIntegrationTests
     {
         await using var factory = new ApiWebApplicationFactory();
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-        await factory.SeedUserAsync("student@example.com", "Password123!", ApplicationRoles.Student);
+        var password = NewTestPassword();
+        await factory.SeedUserAsync("student@example.com", password, ApplicationRoles.Student);
 
-        await client.PostAsJsonAsync("/api/auth/login", new { email = "student@example.com", password = "Password123!" });
+        await client.PostAsJsonAsync("/api/auth/login", new { email = "student@example.com", password });
         client.DefaultRequestHeaders.Add("X-XSRF-TOKEN", "invalid-token");
 
         var logout = await client.PostAsync("/api/auth/logout", null);
@@ -187,11 +194,178 @@ public class AuthIntegrationTests
     {
         await using var factory = new ApiWebApplicationFactory();
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-        await factory.SeedUserAsync("student@example.com", "Password123!", ApplicationRoles.Student);
-        await client.PostAsJsonAsync("/api/auth/login", new { email = "student@example.com", password = "Password123!" });
+        var password = NewTestPassword();
+        await factory.SeedUserAsync("student@example.com", password, ApplicationRoles.Student);
+        await client.PostAsJsonAsync("/api/auth/login", new { email = "student@example.com", password });
 
         var response = await client.GetAsync("/api/test-authorization/admin");
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+    }
+
+    [TestCase(ApplicationRoles.Admin)]
+    [TestCase(ApplicationRoles.Instructor)]
+    public async Task AdminCourseSessions_WhenUserHasStaffRole_AllowsListing(string role)
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var courseId = await factory.SeedCourseAsync(CourseType.RiskettanBil);
+        var session = await factory.SeedCourseSessionAsync(courseId, isPublished: false);
+        await SignInAsync(factory, client, $"{role.ToLowerInvariant()}@example.com", role);
+
+        var response = await client.GetAsync("/api/admin/course-sessions");
+        var sessions = await response.Content.ReadFromJsonAsync<AdminCourseSessionResponse[]>();
+        var start = DateTimeOffset.UtcNow.AddDays(7);
+        var create = await client.PostAsJsonAsync("/api/admin/course-sessions", new
+        {
+            courseId,
+            startTime = start,
+            endTime = start.AddHours(2),
+            capacity = 8,
+        });
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(sessions, Has.Some.Matches<AdminCourseSessionResponse>(x => x.Id == session.Id && !x.IsPublished));
+            Assert.That(create.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+        });
+    }
+
+    [Test]
+    public async Task AdminCourseSessions_WhenStudentRequestsList_ReturnsForbidden()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await SignInAsync(factory, client, "student@example.com", ApplicationRoles.Student);
+
+        var response = await client.GetAsync("/api/admin/course-sessions");
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+    }
+
+    [Test]
+    public async Task AdminCourseSessions_WhenUnauthenticated_ReturnsUnauthorized()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        var response = await client.GetAsync("/api/admin/course-sessions");
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+    }
+
+    [Test]
+    public async Task AdminCourseSessions_WhenWritingWithoutCsrfToken_RejectsAllWriteMethods()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await SignInWithoutCsrfHeaderAsync(factory, client, "admin@example.com", ApplicationRoles.Admin);
+        var sessionId = Guid.NewGuid();
+
+        var responses = new[]
+        {
+            await client.PostAsJsonAsync("/api/admin/course-sessions", new
+            {
+                courseId = Guid.NewGuid(),
+                startTime = DateTimeOffset.UtcNow.AddDays(3),
+                endTime = DateTimeOffset.UtcNow.AddDays(3).AddHours(2),
+                capacity = 10,
+            }),
+            await client.PutAsJsonAsync($"/api/admin/course-sessions/{sessionId}", new { capacity = 10 }),
+            await client.PostAsync($"/api/admin/course-sessions/{sessionId}/publish", null),
+            await client.PostAsync($"/api/admin/course-sessions/{sessionId}/unpublish", null),
+            await client.DeleteAsync($"/api/admin/course-sessions/{sessionId}"),
+        };
+
+        Assert.That(responses.Select(x => x.StatusCode), Is.All.EqualTo(HttpStatusCode.BadRequest));
+    }
+
+    [TestCase(CourseType.RiskettanBil)]
+    [TestCase(CourseType.RiskettanMC)]
+    public async Task AdminCourseSessions_WhenRequestIsValid_CreatesUpdatesPublishesAndDeletes(CourseType courseType)
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var courseId = await factory.SeedCourseAsync(courseType);
+        await SignInAsync(factory, client, "admin@example.com", ApplicationRoles.Admin);
+
+        var start = DateTimeOffset.UtcNow.AddDays(10);
+        var end = start.AddHours(2);
+        var create = await client.PostAsJsonAsync("/api/admin/course-sessions", new
+        {
+            courseId,
+            startTime = start,
+            endTime = end,
+            capacity = 8,
+        });
+        Assert.That(create.StatusCode, Is.EqualTo(HttpStatusCode.Created));
+        var created = await create.Content.ReadFromJsonAsync<AdminCourseSessionResponse>();
+        Assert.That(created, Is.Not.Null);
+
+        var list = await client.GetFromJsonAsync<AdminCourseSessionResponse[]>("/api/admin/course-sessions");
+        Assert.That(list, Has.Some.Matches<AdminCourseSessionResponse>(x => x.Id == created!.Id && !x.IsPublished));
+
+        var updatedStart = start.AddDays(1);
+        var updatedEnd = end.AddDays(1);
+        var update = await client.PutAsJsonAsync($"/api/admin/course-sessions/{created!.Id}", new
+        {
+            startTime = updatedStart,
+            endTime = updatedEnd,
+            capacity = 12,
+        });
+        Assert.That(update.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var updated = await update.Content.ReadFromJsonAsync<AdminCourseSessionResponse>();
+        Assert.Multiple(() =>
+        {
+            Assert.That(updated!.StartTime, Is.EqualTo(updatedStart));
+            Assert.That(updated.EndTime, Is.EqualTo(updatedEnd));
+            Assert.That(updated.Capacity, Is.EqualTo(12));
+        });
+
+        Assert.That((await client.PostAsync($"/api/admin/course-sessions/{created.Id}/publish", null)).StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
+        var published = await client.GetFromJsonAsync<AdminCourseSessionResponse[]>("/api/admin/course-sessions");
+        Assert.That(published, Has.Some.Matches<AdminCourseSessionResponse>(x => x.Id == created.Id && x.IsPublished));
+
+        Assert.That((await client.PostAsync($"/api/admin/course-sessions/{created.Id}/unpublish", null)).StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
+        Assert.That((await client.DeleteAsync($"/api/admin/course-sessions/{created.Id}")).StatusCode, Is.EqualTo(HttpStatusCode.NoContent));
+    }
+
+    [Test]
+    public async Task AdminCourseSessions_WhenSessionHasBookingHistory_PreservesCapacityAndDeleteRules()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var courseId = await factory.SeedCourseAsync(CourseType.RiskettanBil);
+        var session = await factory.SeedCourseSessionAsync(courseId, isPublished: true, capacity: 5);
+        await factory.AddConfirmedBookingsAsync(session.Id, count: 2);
+        await SignInAsync(factory, client, "admin@example.com", ApplicationRoles.Admin);
+
+        var update = await client.PutAsJsonAsync($"/api/admin/course-sessions/{session.Id}", new { capacity = 1 });
+        var delete = await client.DeleteAsync($"/api/admin/course-sessions/{session.Id}");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(update.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+            Assert.That(delete.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+        });
+    }
+
+    [Test]
+    public async Task AdminCourseSessions_WhenCourseIsInactive_RejectsCreation()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var inactiveCourseId = await factory.SeedCourseAsync(CourseType.RiskettanMC, isActive: false);
+        await SignInAsync(factory, client, "admin@example.com", ApplicationRoles.Admin);
+        var start = DateTimeOffset.UtcNow.AddDays(5);
+
+        var response = await client.PostAsJsonAsync("/api/admin/course-sessions", new
+        {
+            courseId = inactiveCourseId,
+            startTime = start,
+            endTime = start.AddHours(2),
+            capacity = 10,
+        });
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
     }
 
     [Test]
@@ -218,11 +392,110 @@ public class AuthIntegrationTests
     }
 
     [Test]
+    public async Task ApiStartup_DoesNotCreateAnAdministrator()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var scope = factory.Services.CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+
+        Assert.That(await userManager.GetUsersInRoleAsync(ApplicationRoles.Admin), Is.Empty);
+    }
+
+    [Test]
+    public async Task FirstAdminProvisioner_WhenAdminRoleIsMissing_CreatesIdentityUserAndAdminRole()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var scope = factory.Services.CreateScope();
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var provisioner = scope.ServiceProvider.GetRequiredService<FirstAdminProvisioner>();
+        var password = NewTestPassword();
+        var adminRole = await roleManager.FindByNameAsync(ApplicationRoles.Admin);
+        Assert.That(adminRole, Is.Not.Null);
+        Assert.That((await roleManager.DeleteAsync(adminRole!)).Succeeded, Is.True);
+
+        var result = await provisioner.CreateFirstAdminAsync(
+            "  principal@example.com  ",
+            password,
+            "Principal",
+            "Administrator");
+        var user = await userManager.FindByEmailAsync("principal@example.com");
+        var adminRoleExists = await roleManager.RoleExistsAsync(ApplicationRoles.Admin);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.WasCreated, Is.True);
+            Assert.That(result.AdminAlreadyExists, Is.False);
+            Assert.That(adminRoleExists, Is.True);
+            Assert.That(user, Is.Not.Null);
+            Assert.That(user!.PasswordHash, Is.Not.Empty);
+        });
+        Assert.That(await userManager.IsInRoleAsync(user!, ApplicationRoles.Admin), Is.True);
+        Assert.That(await userManager.CheckPasswordAsync(user!, password), Is.True);
+    }
+
+    [Test]
+    public async Task FirstAdminProvisioner_WhenAdminAlreadyExists_DoesNotCreateAnotherAccount()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var scope = factory.Services.CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var provisioner = scope.ServiceProvider.GetRequiredService<FirstAdminProvisioner>();
+
+        var first = await provisioner.CreateFirstAdminAsync("first@example.com", NewTestPassword(), "First", "Admin");
+        var second = await provisioner.CreateFirstAdminAsync("second@example.com", NewTestPassword(), "Second", "Admin");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(first.WasCreated, Is.True);
+            Assert.That(second.WasCreated, Is.False);
+            Assert.That(second.AdminAlreadyExists, Is.True);
+        });
+        Assert.That(await userManager.FindByEmailAsync("second@example.com"), Is.Null);
+        Assert.That(await userManager.GetUsersInRoleAsync(ApplicationRoles.Admin), Has.Count.EqualTo(1));
+    }
+
+    [Test]
+    public async Task FirstAdminProvisioner_WhenEmailBelongsToExistingStudent_DoesNotPromoteStudent()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        await factory.SeedUserAsync("student@example.com", NewTestPassword(), ApplicationRoles.Student);
+        using var scope = factory.Services.CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var provisioner = scope.ServiceProvider.GetRequiredService<FirstAdminProvisioner>();
+
+        var result = await provisioner.CreateFirstAdminAsync("student@example.com", NewTestPassword(), "Student", "Account");
+        var student = await userManager.FindByEmailAsync("student@example.com");
+
+        Assert.That(result.WasCreated, Is.False);
+        Assert.That(result.Errors, Is.Not.Empty);
+        Assert.That(await userManager.IsInRoleAsync(student!, ApplicationRoles.Admin), Is.False);
+        Assert.That(await userManager.GetUsersInRoleAsync(ApplicationRoles.Admin), Is.Empty);
+    }
+
+    [Test]
+    public async Task FirstAdminProvisioner_WhenPasswordFailsIdentityPolicy_DoesNotCreateUser()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var scope = factory.Services.CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var provisioner = scope.ServiceProvider.GetRequiredService<FirstAdminProvisioner>();
+
+        var result = await provisioner.CreateFirstAdminAsync("weak@example.com", NewWeakTestPassword(), "Weak", "Test");
+
+        Assert.That(result.WasCreated, Is.False);
+        Assert.That(result.Errors, Is.Not.Empty);
+        Assert.That(await userManager.FindByEmailAsync("weak@example.com"), Is.Null);
+    }
+
+    [Test]
     public void StudentCannotAssignThemselvesPersonalRole()
     {
         Assert.Multiple(() =>
         {
             Assert.That(RegistrationPermissions.CanSelfRegister([ApplicationRoles.Student]), Is.True);
+            Assert.That(RegistrationPermissions.CanSelfRegister([ApplicationRoles.Student, ApplicationRoles.Admin]), Is.False);
+            Assert.That(RegistrationPermissions.CanSelfRegister([ApplicationRoles.Student, ApplicationRoles.Instructor]), Is.False);
             Assert.That(RegistrationPermissions.CanSelfRegister([ApplicationRoles.Instructor]), Is.False);
             Assert.That(RegistrationPermissions.CanSelfRegister([ApplicationRoles.Admin]), Is.False);
         });
@@ -238,6 +511,36 @@ public class AuthIntegrationTests
         public Guid? StudentProfileId { get; init; }
         public Guid? InstructorProfileId { get; init; }
     }
+
+    private sealed record AdminCourseSessionResponse(
+        Guid Id,
+        Guid CourseId,
+        DateTimeOffset StartTime,
+        DateTimeOffset EndTime,
+        int Capacity,
+        bool IsPublished);
+
+    private static async Task SignInAsync(ApiWebApplicationFactory factory, HttpClient client, string email, string role)
+    {
+        await SignInWithoutCsrfHeaderAsync(factory, client, email, role);
+        var me = await client.GetAsync("/api/auth/me");
+        Assert.That(me.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        var currentUser = await me.Content.ReadFromJsonAsync<AuthMeResponse>();
+        Assert.That(currentUser?.Roles, Contains.Item(role));
+        client.DefaultRequestHeaders.Add("X-XSRF-TOKEN", factory.GetAntiforgeryTokenFromResponse(me));
+    }
+
+    private static async Task SignInWithoutCsrfHeaderAsync(ApiWebApplicationFactory factory, HttpClient client, string email, string role)
+    {
+        var password = NewTestPassword();
+        await factory.SeedUserAsync(email, password, role);
+        var login = await client.PostAsJsonAsync("/api/auth/login", new { email, password });
+        Assert.That(login.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+    }
+
+    private static string NewTestPassword() => $"T{Guid.NewGuid():N}a1";
+
+    private static string NewWeakTestPassword() => Guid.NewGuid().ToString("N")[..4];
 
     private sealed class ApiWebApplicationFactory : WebApplicationFactory<Program>
     {
@@ -326,6 +629,42 @@ public class AuthIntegrationTests
             }
 
             await userManager.AddToRoleAsync(user, role);
+        }
+
+        public async Task<Guid> SeedCourseAsync(CourseType courseType, bool isActive = true)
+        {
+            using var scope = Services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var course = new Course(courseType, courseType.ToString(), 3200m, isActive);
+            dbContext.Courses.Add(course);
+            await dbContext.SaveChangesAsync();
+            return course.Id;
+        }
+
+        public async Task<CourseSession> SeedCourseSessionAsync(Guid courseId, bool isPublished, int capacity = 10)
+        {
+            using var scope = Services.CreateScope();
+            var service = scope.ServiceProvider.GetRequiredService<ICourseSessionAdministrationService>();
+            var start = DateTimeOffset.UtcNow.AddDays(5);
+            return await service.CreateCourseSessionAsync(courseId, start, start.AddHours(2), capacity, isPublished);
+        }
+
+        public async Task AddConfirmedBookingsAsync(Guid courseSessionId, int count)
+        {
+            using var scope = Services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            for (var index = 0; index < count; index++)
+            {
+                var student = new StudentProfile($"Student{index}", "Test", $"student{index}@example.com");
+                dbContext.StudentProfiles.Add(student);
+                await dbContext.SaveChangesAsync();
+
+                var booking = new CourseBooking(courseSessionId, student.FirstName + " Test", student.Email, "0701234567", student.Id);
+                booking.Confirm();
+                dbContext.CourseBookings.Add(booking);
+            }
+
+            await dbContext.SaveChangesAsync();
         }
 
         public string GetAntiforgeryTokenFromResponse(params HttpResponseMessage[] responses)

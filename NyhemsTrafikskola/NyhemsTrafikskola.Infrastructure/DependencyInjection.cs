@@ -28,6 +28,7 @@ public static class DependencyInjection
         services.AddScoped<ICourseBookingService, CourseBookingService>();
         services.AddScoped<ICourseSessionAdministrationService, CourseSessionAdministrationService>();
         services.AddScoped<RoleInitializer>();
+        services.AddScoped<FirstAdminProvisioner>();
 
         services.AddIdentity<ApplicationUser, IdentityRole>(options =>
         {

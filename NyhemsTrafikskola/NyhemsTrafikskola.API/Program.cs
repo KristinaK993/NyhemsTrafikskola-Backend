@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Http;
+using System.Text;
 using NyhemsTrafikskola.Infrastructure;
 using NyhemsTrafikskola.Infrastructure.Auth;
 
@@ -7,9 +8,13 @@ namespace NyhemsTrafikskola.API
 {
     public partial class Program
     {
-        public static void Main(string[] args)
+        private const string FirstAdminCommand = "--create-first-admin";
+
+        public static async Task Main(string[] args)
         {
-            var builder = WebApplication.CreateBuilder(args);
+            var createFirstAdmin = args.Contains(FirstAdminCommand, StringComparer.Ordinal);
+            var builderArgs = args.Where(argument => !string.Equals(argument, FirstAdminCommand, StringComparison.Ordinal)).ToArray();
+            var builder = WebApplication.CreateBuilder(builderArgs);
 
             builder.Services.AddInfrastructure(builder.Configuration);
 
@@ -43,6 +48,13 @@ namespace NyhemsTrafikskola.API
             });
 
             var app = builder.Build();
+
+            if (createFirstAdmin)
+            {
+                await RunFirstAdminSetupAsync(app);
+                await app.DisposeAsync();
+                return;
+            }
 
             using (var scope = app.Services.CreateScope())
             {
@@ -86,6 +98,92 @@ namespace NyhemsTrafikskola.API
             app.MapControllers();
 
             app.Run();
+        }
+
+        private static async Task RunFirstAdminSetupAsync(WebApplication app)
+        {
+            if (Console.IsInputRedirected)
+            {
+                Console.Error.WriteLine("First-admin setup requires an interactive local terminal.");
+                Environment.ExitCode = 2;
+                return;
+            }
+
+            Console.Write("Administrator email: ");
+            var email = Console.ReadLine();
+            Console.Write("First name: ");
+            var firstName = Console.ReadLine();
+            Console.Write("Last name: ");
+            var lastName = Console.ReadLine();
+
+            var password = ReadPassword("Password: ");
+            var passwordConfirmation = ReadPassword("Confirm password: ");
+            Console.WriteLine();
+
+            if (!string.Equals(password, passwordConfirmation, StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine("Passwords do not match. No account was created.");
+                Environment.ExitCode = 2;
+                return;
+            }
+
+            using var scope = app.Services.CreateScope();
+            var provisioner = scope.ServiceProvider.GetRequiredService<FirstAdminProvisioner>();
+            var result = await provisioner.CreateFirstAdminAsync(email ?? string.Empty, password, firstName ?? string.Empty, lastName ?? string.Empty);
+
+            if (result.WasCreated)
+            {
+                Console.WriteLine("The first administrator was created successfully.");
+                return;
+            }
+
+            if (result.AdminAlreadyExists)
+            {
+                Console.WriteLine("An administrator already exists. No account was created.");
+                return;
+            }
+
+            foreach (var error in result.Errors)
+            {
+                Console.Error.WriteLine(error);
+            }
+
+            Environment.ExitCode = 1;
+        }
+
+        private static string ReadPassword(string prompt)
+        {
+            Console.Write(prompt);
+            var password = new StringBuilder();
+
+            while (true)
+            {
+                var key = Console.ReadKey(intercept: true);
+                if (key.Key == ConsoleKey.Enter)
+                {
+                    break;
+                }
+
+                if (key.Key == ConsoleKey.Backspace)
+                {
+                    if (password.Length > 0)
+                    {
+                        password.Length--;
+                        Console.Write("\b \b");
+                    }
+
+                    continue;
+                }
+
+                if (!char.IsControl(key.KeyChar))
+                {
+                    password.Append(key.KeyChar);
+                    Console.Write('*');
+                }
+            }
+
+            Console.WriteLine();
+            return password.ToString();
         }
     }
 

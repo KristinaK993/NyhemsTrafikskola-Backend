@@ -4,7 +4,9 @@ public static class RegistrationPermissions
 {
     public static bool CanSelfRegister(IEnumerable<string> roles)
     {
-        return roles.Contains(ApplicationRoles.Student, StringComparer.OrdinalIgnoreCase);
+        var requestedRoles = roles.ToArray();
+        return requestedRoles.Length > 0
+            && requestedRoles.All(role => string.Equals(role, ApplicationRoles.Student, StringComparison.OrdinalIgnoreCase));
     }
 
     public static bool CanRegisterStudent(IEnumerable<string> roles)
