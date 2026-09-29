@@ -2,6 +2,8 @@ namespace NyhemsTrafikskola.Domain;
 
 public class CourseBooking
 {
+    private const int PendingReservationMinutes = 30;
+
     private CourseBooking()
     {
         CourseSessionId = Guid.Empty;
@@ -10,6 +12,7 @@ public class CourseBooking
         Phone = string.Empty;
         CreatedAt = DateTimeOffset.UtcNow;
         Status = BookingStatus.Pending;
+        ExpiresAt = null;
     }
 
     public CourseBooking(
@@ -18,7 +21,8 @@ public class CourseBooking
         string email,
         string phone,
         Guid? studentProfileId = null,
-        DateTimeOffset createdAt = default)
+        DateTimeOffset createdAt = default,
+        DateTimeOffset? expiresAt = null)
         : this()
     {
         CourseSessionId = courseSessionId;
@@ -28,6 +32,7 @@ public class CourseBooking
         StudentProfileId = studentProfileId;
         CreatedAt = createdAt == default ? DateTimeOffset.UtcNow : createdAt;
         Status = BookingStatus.Pending;
+        ExpiresAt = expiresAt;
     }
 
     public Guid Id { get; private set; } = Guid.NewGuid();
@@ -38,6 +43,57 @@ public class CourseBooking
     public string Phone { get; private set; }
     public BookingStatus Status { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset? ExpiresAt { get; private set; }
+
+    public bool IsPendingReservationValid(DateTimeOffset? utcNow = null)
+    {
+        var now = utcNow ?? DateTimeOffset.UtcNow;
+        return Status == BookingStatus.Pending && (!ExpiresAt.HasValue || ExpiresAt.Value > now);
+    }
+
+    public bool CountsTowardCapacity(DateTimeOffset? utcNow = null)
+    {
+        var now = utcNow ?? DateTimeOffset.UtcNow;
+        return Status == BookingStatus.Confirmed || IsPendingReservationValid(now);
+    }
+
+    public static CourseBooking CreatePendingReservation(
+        Guid courseSessionId,
+        string customerName,
+        string email,
+        string phone,
+        Guid? studentProfileId = null,
+        DateTimeOffset? createdAt = null)
+    {
+        var now = createdAt ?? DateTimeOffset.UtcNow;
+        return new CourseBooking(
+            courseSessionId,
+            customerName,
+            email,
+            phone,
+            studentProfileId,
+            now,
+            now.AddMinutes(PendingReservationMinutes));
+    }
+
+    public static CourseBooking CreatePendingReservation(
+        Guid courseSessionId,
+        string customerName,
+        string email,
+        string phone,
+        Guid? studentProfileId,
+        DateTimeOffset expiresAt)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return new CourseBooking(
+            courseSessionId,
+            customerName,
+            email,
+            phone,
+            studentProfileId,
+            now,
+            expiresAt);
+    }
 
     public void AssignStudentProfile(Guid studentProfileId)
     {
@@ -56,12 +112,18 @@ public class CourseBooking
             throw new InvalidOperationException("A cancelled booking cannot be confirmed.");
         }
 
+        if (Status == BookingStatus.Pending && ExpiresAt.HasValue && ExpiresAt <= DateTimeOffset.UtcNow)
+        {
+            throw new InvalidOperationException("An expired reservation cannot be confirmed.");
+        }
+
         if (StudentProfileId is null || StudentProfileId == Guid.Empty)
         {
             throw new InvalidOperationException("A confirmed booking must be linked to a student profile.");
         }
 
         Status = BookingStatus.Confirmed;
+        ExpiresAt = null;
     }
 
     public void Cancel()
@@ -72,6 +134,7 @@ public class CourseBooking
         }
 
         Status = BookingStatus.Cancelled;
+        ExpiresAt = null;
     }
 
     private static string ValidateRequiredText(string value, string parameterName)

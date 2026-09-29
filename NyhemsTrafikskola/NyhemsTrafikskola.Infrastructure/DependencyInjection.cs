@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using NyhemsTrafikskola.Application.Bookings;
 
 namespace NyhemsTrafikskola.Infrastructure;
 
@@ -18,6 +19,8 @@ public static class DependencyInjection
 
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseSqlServer(connectionString));
+
+        services.AddScoped<ICourseBookingService, CourseBookingService>();
 
         services.AddIdentity<ApplicationUser, IdentityRole>(options =>
         {

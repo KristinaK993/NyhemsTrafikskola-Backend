@@ -198,6 +198,9 @@ namespace NyhemsTrafikskola.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<string>("CustomerName")
                         .IsRequired()
                         .HasMaxLength(200)
