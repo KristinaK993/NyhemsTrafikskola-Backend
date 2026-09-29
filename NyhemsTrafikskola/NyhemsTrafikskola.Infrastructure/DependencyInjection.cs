@@ -1,8 +1,13 @@
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using NyhemsTrafikskola.Application.Administration;
+using NyhemsTrafikskola.Application.Authorization;
 using NyhemsTrafikskola.Application.Bookings;
+using NyhemsTrafikskola.Infrastructure.Auth;
 
 namespace NyhemsTrafikskola.Infrastructure;
 
@@ -21,6 +26,8 @@ public static class DependencyInjection
             options.UseSqlServer(connectionString));
 
         services.AddScoped<ICourseBookingService, CourseBookingService>();
+        services.AddScoped<ICourseSessionAdministrationService, CourseSessionAdministrationService>();
+        services.AddScoped<RoleInitializer>();
 
         services.AddIdentity<ApplicationUser, IdentityRole>(options =>
         {
@@ -29,8 +36,38 @@ public static class DependencyInjection
             options.Password.RequireNonAlphanumeric = false;
             options.Password.RequireUppercase = true;
             options.Password.RequireLowercase = true;
+            options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(5);
+            options.Lockout.MaxFailedAccessAttempts = 5;
+            options.Lockout.AllowedForNewUsers = true;
         })
         .AddEntityFrameworkStores<ApplicationDbContext>();
+
+        services.ConfigureApplicationCookie(options =>
+        {
+            options.Cookie.Name = ".NyhemsTrafikskola.Auth";
+            options.Cookie.HttpOnly = true;
+            options.Cookie.IsEssential = true;
+            options.Cookie.SameSite = SameSiteMode.None;
+            options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+            options.Events.OnRedirectToLogin = context =>
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return Task.CompletedTask;
+            };
+            options.Events.OnRedirectToAccessDenied = context =>
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return Task.CompletedTask;
+            };
+        });
+
+        services.AddAuthorization(options =>
+        {
+            options.AddPolicy("RequireInstructorOrAdmin", policy =>
+                policy.RequireRole(ApplicationRoles.Instructor, ApplicationRoles.Admin));
+            options.AddPolicy("RequireAdmin", policy =>
+                policy.RequireRole(ApplicationRoles.Admin));
+        });
 
         return services;
     }

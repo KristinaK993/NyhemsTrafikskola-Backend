@@ -28,6 +28,17 @@ public class CourseSession
         IsPublished = false;
     }
 
+    public void UpdateSchedule(DateTimeOffset startTime, DateTimeOffset endTime)
+    {
+        StartTime = ValidateStartTime(startTime);
+        EndTime = ValidateEndTime(startTime, endTime);
+    }
+
+    public void UpdateCapacity(int capacity)
+    {
+        Capacity = ValidateCapacity(capacity);
+    }
+
     private static DateTimeOffset ValidateStartTime(DateTimeOffset startTime)
     {
         return startTime;

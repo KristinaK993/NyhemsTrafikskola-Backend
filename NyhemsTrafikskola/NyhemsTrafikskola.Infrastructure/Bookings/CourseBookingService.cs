@@ -34,30 +34,39 @@ public sealed class CourseBookingService : ICourseBookingService
     {
         var now = DateTimeOffset.UtcNow;
 
-        var sessions = await (
-            from course in _dbContext.Courses
-            join session in _dbContext.CourseSessions on course.Id equals session.CourseId
-            where course.Type == courseType
-                && course.IsActive
-                && session.IsPublished
-                && session.StartTime > now
-            select new { Course = course, Session = session })
+        var courses = await _dbContext.Courses
+            .AsNoTracking()
+            .Where(x => x.Type == courseType && x.IsActive)
             .ToListAsync(cancellationToken);
 
-        var results = new List<CourseSessionAvailabilityDto>(sessions.Count);
+        var courseIds = courses.Select(x => x.Id).ToHashSet();
 
-        foreach (var item in sessions)
+        var sessions = await _dbContext.CourseSessions
+            .AsNoTracking()
+            .Where(x => x.IsPublished && courseIds.Contains(x.CourseId))
+            .ToListAsync(cancellationToken);
+
+        var matchingSessions = sessions
+            .Where(x => x.StartTime > now)
+            .ToList();
+
+        var results = new List<CourseSessionAvailabilityDto>(matchingSessions.Count);
+
+        foreach (var session in matchingSessions)
         {
-            var occupiedSeats = await CountOccupiedSeatsAsync(item.Session.Id, cancellationToken);
+            var course = courses.Single(x => x.Id == session.CourseId);
+            var occupiedSeats = await CountOccupiedSeatsAsync(session.Id, cancellationToken);
 
             results.Add(new CourseSessionAvailabilityDto(
-                item.Session.Id,
-                item.Course.Id,
-                item.Course.Type,
-                item.Session.StartTime,
-                item.Session.EndTime,
-                item.Session.Capacity,
-                item.Session.Capacity - occupiedSeats));
+                session.Id,
+                course.Id,
+                course.Type,
+                course.Title,
+                course.Price,
+                session.StartTime,
+                session.EndTime,
+                session.Capacity,
+                session.Capacity - occupiedSeats));
         }
 
         return results;
