@@ -18,10 +18,69 @@ public sealed class AdminCourseSessionsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyCollection<CourseSessionAdminResponse>>> GetAll(CancellationToken cancellationToken)
+    public async Task<ActionResult<IReadOnlyCollection<CourseSessionAdminResponse>>> GetAll([FromQuery] bool archived = false, CancellationToken cancellationToken = default)
     {
-        var sessions = await _administrationService.GetAllCourseSessionsAsync(cancellationToken);
-        return Ok(sessions.Select(CourseSessionAdminResponse.From));
+        var sessions = await _administrationService.GetCourseSessionSummariesAsync(archived, cancellationToken);
+        return Ok(sessions.Select(x => CourseSessionAdminResponse.From(x.Session, x.BookingHistoryCount)));
+    }
+
+    [HttpGet("{courseSessionId:guid}")]
+    public async Task<ActionResult<CourseSessionAdminDetailsResponse>> GetDetails(Guid courseSessionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var details = await _administrationService.GetCourseSessionDetailsAsync(courseSessionId, cancellationToken);
+            return Ok(CourseSessionAdminDetailsResponse.From(details));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return NotFound(new { message = exception.Message });
+        }
+    }
+
+    [HttpPost("{courseSessionId:guid}/bookings/{bookingId:guid}/cancel")]
+    public async Task<ActionResult<CourseSessionAdminDetailsResponse>> CancelBooking(
+        Guid courseSessionId,
+        Guid bookingId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var details = await _administrationService.CancelBookingAsync(courseSessionId, bookingId, cancellationToken);
+            return Ok(CourseSessionAdminDetailsResponse.From(details));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Conflict(new { message = exception.Message });
+        }
+    }
+
+    [HttpPost("{courseSessionId:guid}/cancel")]
+    public async Task<ActionResult<CourseSessionAdminDetailsResponse>> CancelCourseSession(Guid courseSessionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var details = await _administrationService.CancelCourseSessionAsync(courseSessionId, cancellationToken);
+            return Ok(CourseSessionAdminDetailsResponse.From(details));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return NotFound(new { message = exception.Message });
+        }
+    }
+
+    [HttpPost("{courseSessionId:guid}/archive")]
+    public async Task<IActionResult> Archive(Guid courseSessionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _administrationService.ArchiveCourseSessionAsync(courseSessionId, cancellationToken);
+            return NoContent();
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Conflict(new { message = exception.Message });
+        }
     }
 
     [HttpPost]
@@ -29,13 +88,18 @@ public sealed class AdminCourseSessionsController : ControllerBase
         [FromBody] CreateCourseSessionRequest request,
         CancellationToken cancellationToken)
     {
+        if (request.Capacity != CourseSession.StandardCapacity)
+        {
+            return BadRequest(new { message = "Riskettan Bil and Riskettan MC sessions must have a capacity of 16 participants." });
+        }
+
         try
         {
             var session = await _administrationService.CreateCourseSessionAsync(
                 request.CourseId,
                 request.StartTime,
                 request.EndTime,
-                request.Capacity,
+                CourseSession.StandardCapacity,
                 request.IsPublished,
                 cancellationToken);
 
@@ -57,13 +121,18 @@ public sealed class AdminCourseSessionsController : ControllerBase
         [FromBody] UpdateCourseSessionRequest request,
         CancellationToken cancellationToken)
     {
+        if (request.Capacity.HasValue && request.Capacity.Value != CourseSession.StandardCapacity)
+        {
+            return BadRequest(new { message = "Riskettan Bil and Riskettan MC sessions must have a capacity of 16 participants." });
+        }
+
         try
         {
             var session = await _administrationService.UpdateCourseSessionAsync(
                 courseSessionId,
                 request.StartTime,
                 request.EndTime,
-                request.Capacity,
+                CourseSession.StandardCapacity,
                 cancellationToken);
 
             return Ok(CourseSessionAdminResponse.From(session));
@@ -138,14 +207,62 @@ public sealed class AdminCourseSessionsController : ControllerBase
         DateTimeOffset StartTime,
         DateTimeOffset EndTime,
         int Capacity,
-        bool IsPublished)
+        bool IsPublished,
+        bool IsCancelled,
+        bool IsArchived,
+        int BookingHistoryCount)
     {
-        public static CourseSessionAdminResponse From(CourseSession session) => new(
+        public static CourseSessionAdminResponse From(CourseSession session, int bookingHistoryCount = 0) => new(
             session.Id,
             session.CourseId,
             session.StartTime,
             session.EndTime,
-            session.Capacity,
-            session.IsPublished);
+            CourseSession.StandardCapacity,
+            session.IsPublished,
+            session.IsCancelled,
+            session.IsArchived,
+            bookingHistoryCount);
+    }
+
+    public sealed record CourseSessionAdminDetailsResponse(
+        Guid CourseSessionId,
+        int Capacity,
+        int ActiveBookingCount,
+        int AvailableSeats,
+        bool IsCancelled,
+        bool IsArchived,
+        IReadOnlyCollection<CourseBookingAdminResponse> Bookings)
+    {
+        public static CourseSessionAdminDetailsResponse From(CourseSessionAdminDetails details) => new(
+            details.CourseSessionId,
+            details.Capacity,
+            details.ActiveBookingCount,
+            details.AvailableSeats,
+            details.IsCancelled,
+            details.IsArchived,
+            details.Bookings.Select(CourseBookingAdminResponse.From).ToList());
+    }
+
+    public sealed record CourseBookingAdminResponse(
+        Guid Id,
+        string CustomerName,
+        string? FirstName,
+        string? LastName,
+        string Email,
+        string Phone,
+        DateTimeOffset CreatedAt,
+        string Status,
+        bool CountsTowardCapacity)
+    {
+        public static CourseBookingAdminResponse From(CourseBookingAdminDetails booking) => new(
+            booking.Id,
+            booking.CustomerName,
+            booking.FirstName,
+            booking.LastName,
+            booking.Email,
+            booking.Phone,
+            booking.CreatedAt,
+            booking.Status,
+            booking.CountsTowardCapacity);
     }
 }

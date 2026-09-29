@@ -26,6 +26,7 @@ public static class DependencyInjection
             options.UseSqlServer(connectionString));
 
         services.AddScoped<ICourseBookingService, CourseBookingService>();
+        services.AddScoped<ICourseAdministrationService, CourseAdministrationService>();
         services.AddScoped<ICourseSessionAdministrationService, CourseSessionAdministrationService>();
         services.AddScoped<RoleInitializer>();
         services.AddScoped<FirstAdminProvisioner>();

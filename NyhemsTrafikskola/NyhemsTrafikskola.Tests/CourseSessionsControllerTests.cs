@@ -64,8 +64,8 @@ public class CourseSessionsControllerTests
             Assert.That(items.Count, Is.EqualTo(1));
             Assert.That(items[0].CourseType, Is.EqualTo(CourseType.RiskettanBil));
             Assert.That(items[0].CourseTitle, Is.EqualTo("Riskettan Bil"));
-            Assert.That(items[0].AvailableSeats, Is.EqualTo(3));
-            Assert.That(items[0].TotalSeats, Is.EqualTo(5));
+            Assert.That(items[0].AvailableSeats, Is.EqualTo(CourseSession.StandardCapacity - 2));
+            Assert.That(items[0].TotalSeats, Is.EqualTo(CourseSession.StandardCapacity));
         });
     }
 

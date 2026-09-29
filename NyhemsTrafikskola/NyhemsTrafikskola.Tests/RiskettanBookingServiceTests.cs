@@ -51,7 +51,7 @@ public class RiskettanBookingServiceTests
 
         var available = await service.GetAvailableSeatsAsync(session.Id);
 
-        Assert.That(available, Is.EqualTo(3));
+        Assert.That(available, Is.EqualTo(CourseSession.StandardCapacity - 2));
     }
 
     [Test]
@@ -140,7 +140,7 @@ public class RiskettanBookingServiceTests
         Assert.Multiple(() =>
         {
             Assert.That(result.Status, Is.EqualTo(BookingStatus.Confirmed));
-            Assert.That(result.AvailableSeats, Is.EqualTo(2));
+            Assert.That(result.AvailableSeats, Is.EqualTo(CourseSession.StandardCapacity - 1));
         });
     }
 
@@ -152,20 +152,10 @@ public class RiskettanBookingServiceTests
 
         var course = new Course(CourseType.RiskettanBil, "Riskettan Bil", 3200m, true);
         var session = new CourseSession(course.Id, DateTimeOffset.UtcNow.AddDays(5), DateTimeOffset.UtcNow.AddDays(5).AddHours(2), 2, true);
-        var firstStudent = new StudentProfile("A", "Andersson", "a@example.com");
-        var secondStudent = new StudentProfile("B", "Bengtsson", "b@example.com");
-
         context.Courses.Add(course);
         context.CourseSessions.Add(session);
-        context.StudentProfiles.AddRange(firstStudent, secondStudent);
-
-        var first = new CourseBooking(session.Id, "A", "a@example.com", "0701111111", firstStudent.Id);
-        first.Confirm();
-
-        var second = new CourseBooking(session.Id, "B", "b@example.com", "0702222222", secondStudent.Id);
-        second.Confirm();
-
-        context.CourseBookings.AddRange(first, second);
+        context.CourseBookings.AddRange(Enumerable.Range(0, CourseSession.StandardCapacity)
+            .Select(index => CourseBooking.CreatePendingReservation(session.Id, $"Student {index}", $"student{index}@example.com", "0701111111")));
         await context.SaveChangesAsync();
 
         var ex = Assert.ThrowsAsync<InvalidOperationException>(async () =>
@@ -267,6 +257,8 @@ public class RiskettanBookingServiceTests
             var session = new CourseSession(course.Id, DateTimeOffset.UtcNow.AddDays(2), DateTimeOffset.UtcNow.AddDays(2).AddHours(2), 1, true);
             seed.Courses.Add(course);
             seed.CourseSessions.Add(session);
+            seed.CourseBookings.AddRange(Enumerable.Range(0, CourseSession.StandardCapacity - 1)
+                .Select(index => CourseBooking.CreatePendingReservation(session.Id, $"Existing {index}", $"existing{index}@example.com", "0701111111")));
             await seed.SaveChangesAsync();
         }
 

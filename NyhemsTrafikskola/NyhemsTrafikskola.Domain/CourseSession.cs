@@ -2,6 +2,8 @@ namespace NyhemsTrafikskola.Domain;
 
 public class CourseSession
 {
+    public const int StandardCapacity = 16;
+
     public CourseSession(Guid courseId, DateTimeOffset startTime, DateTimeOffset endTime, int capacity, bool isPublished = false)
     {
         CourseId = courseId;
@@ -17,15 +19,34 @@ public class CourseSession
     public DateTimeOffset EndTime { get; private set; }
     public int Capacity { get; private set; }
     public bool IsPublished { get; private set; }
+    public bool IsCancelled { get; private set; }
+    public bool IsArchived { get; private set; }
 
     public void Publish()
     {
+        if (IsCancelled || IsArchived)
+        {
+            throw new InvalidOperationException("A cancelled or archived course session cannot be published.");
+        }
+
         IsPublished = true;
     }
 
     public void Unpublish()
     {
         IsPublished = false;
+    }
+
+    public void Cancel()
+    {
+        IsPublished = false;
+        IsCancelled = true;
+    }
+
+    public void Archive()
+    {
+        IsPublished = false;
+        IsArchived = true;
     }
 
     public void UpdateSchedule(DateTimeOffset startTime, DateTimeOffset endTime)

@@ -23,6 +23,34 @@ public interface ICourseSessionAdministrationService
     Task UnpublishCourseSessionAsync(Guid courseSessionId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyCollection<CourseSession>> GetAllCourseSessionsAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyCollection<CourseSessionAdminSummary>> GetCourseSessionSummariesAsync(bool archived, CancellationToken cancellationToken = default);
+
+    Task<CourseSessionAdminDetails> GetCourseSessionDetailsAsync(Guid courseSessionId, CancellationToken cancellationToken = default);
+    Task<CourseSessionAdminDetails> CancelBookingAsync(Guid courseSessionId, Guid bookingId, CancellationToken cancellationToken = default);
+    Task<CourseSessionAdminDetails> CancelCourseSessionAsync(Guid courseSessionId, CancellationToken cancellationToken = default);
+    Task ArchiveCourseSessionAsync(Guid courseSessionId, CancellationToken cancellationToken = default);
 
     Task DeleteCourseSessionAsync(Guid courseSessionId, CancellationToken cancellationToken = default);
 }
+
+public sealed record CourseSessionAdminDetails(
+    Guid CourseSessionId,
+    int Capacity,
+    int ActiveBookingCount,
+    int AvailableSeats,
+    bool IsCancelled,
+    bool IsArchived,
+    IReadOnlyCollection<CourseBookingAdminDetails> Bookings);
+
+public sealed record CourseSessionAdminSummary(CourseSession Session, int BookingHistoryCount);
+
+public sealed record CourseBookingAdminDetails(
+    Guid Id,
+    string CustomerName,
+    string? FirstName,
+    string? LastName,
+    string Email,
+    string Phone,
+    DateTimeOffset CreatedAt,
+    string Status,
+    bool CountsTowardCapacity);

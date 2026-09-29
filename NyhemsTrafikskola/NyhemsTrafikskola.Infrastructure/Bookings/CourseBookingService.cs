@@ -26,8 +26,13 @@ public sealed class CourseBookingService : ICourseBookingService
             throw new InvalidOperationException("Course session was not found.");
         }
 
+        if (session.IsCancelled || session.IsArchived)
+        {
+            return 0;
+        }
+
         var occupiedSeats = await CountOccupiedSeatsAsync(courseSessionId, cancellationToken);
-        return session.Capacity - occupiedSeats;
+        return Math.Max(0, CourseSession.StandardCapacity - occupiedSeats);
     }
 
     public async Task<IReadOnlyCollection<CourseSessionAvailabilityDto>> GetPublishedFutureSessionsAsync(CourseType courseType, CancellationToken cancellationToken = default)
@@ -43,7 +48,7 @@ public sealed class CourseBookingService : ICourseBookingService
 
         var sessions = await _dbContext.CourseSessions
             .AsNoTracking()
-            .Where(x => x.IsPublished && courseIds.Contains(x.CourseId))
+            .Where(x => x.IsPublished && !x.IsCancelled && !x.IsArchived && courseIds.Contains(x.CourseId))
             .ToListAsync(cancellationToken);
 
         var matchingSessions = sessions
@@ -65,8 +70,8 @@ public sealed class CourseBookingService : ICourseBookingService
                 course.Price,
                 session.StartTime,
                 session.EndTime,
-                session.Capacity,
-                session.Capacity - occupiedSeats));
+                CourseSession.StandardCapacity,
+                Math.Max(0, CourseSession.StandardCapacity - occupiedSeats)));
         }
 
         return results;
@@ -116,7 +121,7 @@ public sealed class CourseBookingService : ICourseBookingService
         }
 
         var occupiedSeats = await CountOccupiedSeatsAsync(courseSessionId, cancellationToken);
-        if (occupiedSeats >= session.Capacity)
+        if (occupiedSeats >= CourseSession.StandardCapacity)
         {
             throw new InvalidOperationException("This course session is full and cannot accept more bookings.");
         }
@@ -136,7 +141,7 @@ public sealed class CourseBookingService : ICourseBookingService
             booking.Id,
             booking.CourseSessionId,
             booking.Status,
-            session.Capacity - (occupiedSeats + 1));
+            Math.Max(0, CourseSession.StandardCapacity - (occupiedSeats + 1)));
     }
 
     public async Task<CreateBookingResult> CreateDirectConfirmedBookingAsync(
@@ -171,7 +176,7 @@ public sealed class CourseBookingService : ICourseBookingService
         }
 
         var occupiedSeats = await CountOccupiedSeatsAsync(courseSessionId, cancellationToken);
-        if (occupiedSeats >= session.Capacity)
+        if (occupiedSeats >= CourseSession.StandardCapacity)
         {
             throw new InvalidOperationException("This course session is full and cannot accept more bookings.");
         }
@@ -192,7 +197,7 @@ public sealed class CourseBookingService : ICourseBookingService
             booking.Id,
             booking.CourseSessionId,
             booking.Status,
-            session.Capacity - (occupiedSeats + 1));
+            Math.Max(0, CourseSession.StandardCapacity - (occupiedSeats + 1)));
     }
 
     public async Task<CreateBookingResult> ConfirmPendingReservationAsync(Guid bookingId, Guid studentProfileId, CancellationToken cancellationToken = default)
@@ -231,7 +236,7 @@ public sealed class CourseBookingService : ICourseBookingService
         EnsureSessionAcceptsBooking(session);
 
         var occupiedSeats = await CountOccupiedSeatsAsync(booking.CourseSessionId, cancellationToken);
-        if (occupiedSeats >= session.Capacity)
+        if (occupiedSeats > CourseSession.StandardCapacity)
         {
             throw new InvalidOperationException("This course session is full and cannot accept more bookings.");
         }
@@ -244,7 +249,7 @@ public sealed class CourseBookingService : ICourseBookingService
             booking.Id,
             booking.CourseSessionId,
             booking.Status,
-            session.Capacity - occupiedSeats);
+            Math.Max(0, CourseSession.StandardCapacity - occupiedSeats));
     }
 
     private async Task<CourseSession> GetLockedSessionAsync(Guid courseSessionId, CancellationToken cancellationToken)
@@ -276,6 +281,16 @@ public sealed class CourseBookingService : ICourseBookingService
 
     private static void EnsureSessionAcceptsBooking(CourseSession session)
     {
+        if (session.IsArchived)
+        {
+            throw new InvalidOperationException("The course session has been archived and cannot accept bookings.");
+        }
+
+        if (session.IsCancelled)
+        {
+            throw new InvalidOperationException("The course session has been cancelled and cannot accept bookings.");
+        }
+
         if (!session.IsPublished)
         {
             throw new InvalidOperationException("The course session is not published and cannot accept bookings.");

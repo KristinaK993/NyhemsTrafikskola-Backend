@@ -106,6 +106,10 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
                 .IsRequired();
             entity.Property(x => x.IsPublished)
                 .HasDefaultValue(false);
+            entity.Property(x => x.IsCancelled)
+                .HasDefaultValue(false);
+            entity.Property(x => x.IsArchived)
+                .HasDefaultValue(false);
 
             entity.HasIndex(x => x.CourseId);
             entity.HasIndex(x => new { x.CourseId, x.StartTime });
