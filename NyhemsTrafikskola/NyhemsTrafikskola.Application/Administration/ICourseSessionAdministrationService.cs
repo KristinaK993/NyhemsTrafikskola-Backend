@@ -26,6 +26,13 @@ public interface ICourseSessionAdministrationService
     Task<IReadOnlyCollection<CourseSessionAdminSummary>> GetCourseSessionSummariesAsync(bool archived, CancellationToken cancellationToken = default);
 
     Task<CourseSessionAdminDetails> GetCourseSessionDetailsAsync(Guid courseSessionId, CancellationToken cancellationToken = default);
+    Task<CourseSessionAdminDetails> BookStudentAsync(
+        Guid courseSessionId,
+        string firstName,
+        string lastName,
+        string phone,
+        string email,
+        CancellationToken cancellationToken = default);
     Task<CourseSessionAdminDetails> CancelBookingAsync(Guid courseSessionId, Guid bookingId, CancellationToken cancellationToken = default);
     Task<CourseSessionAdminDetails> CancelCourseSessionAsync(Guid courseSessionId, CancellationToken cancellationToken = default);
     Task ArchiveCourseSessionAsync(Guid courseSessionId, CancellationToken cancellationToken = default);
@@ -42,7 +49,11 @@ public sealed record CourseSessionAdminDetails(
     bool IsArchived,
     IReadOnlyCollection<CourseBookingAdminDetails> Bookings);
 
-public sealed record CourseSessionAdminSummary(CourseSession Session, int BookingHistoryCount);
+public sealed record CourseSessionAdminSummary(
+    CourseSession Session,
+    int BookingHistoryCount,
+    int ActiveBookingCount,
+    int AvailableSeats);
 
 public sealed record CourseBookingAdminDetails(
     Guid Id,

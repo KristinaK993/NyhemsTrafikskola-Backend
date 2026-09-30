@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
@@ -233,6 +234,88 @@ public class AuthIntegrationTests
         });
     }
 
+    [TestCase(ApplicationRoles.Admin)]
+    [TestCase(ApplicationRoles.Instructor)]
+    public async Task AdminCourseSessions_WhenStaffBooksManually_CreatesConfirmedBookingWithoutCreatingAccount(string role)
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var courseId = await factory.SeedCourseAsync(CourseType.RiskettanBil);
+        var session = await factory.SeedCourseSessionAsync(courseId, isPublished: true);
+        await SignInAsync(factory, client, $"{role.ToLowerInvariant()}@example.com", role);
+
+        var response = await client.PostAsJsonAsync($"/api/admin/course-sessions/{session.Id}/bookings", new
+        {
+            firstName = "Anna",
+            lastName = "Andersson",
+            phone = "0701234567",
+            email = "anna@example.com",
+        });
+        var details = await response.Content.ReadFromJsonAsync<AdminCourseSessionDetailsResponse>();
+        var summaryResponse = await client.GetAsync("/api/admin/course-sessions");
+        using var summaryJson = JsonDocument.Parse(await summaryResponse.Content.ReadAsStringAsync());
+        var sessionSummary = summaryJson.RootElement.EnumerateArray()
+            .Single(x => x.GetProperty("id").GetGuid() == session.Id);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(details!.ActiveBookingCount, Is.EqualTo(1));
+            Assert.That(details.AvailableSeats, Is.EqualTo(CourseSession.StandardCapacity - 1));
+            Assert.That(details.Bookings.Single().Status, Is.EqualTo(nameof(BookingStatus.Confirmed)));
+            Assert.That(details.Bookings.Single().Email, Is.EqualTo("anna@example.com"));
+            Assert.That(details.Bookings.Single().FirstName, Is.EqualTo("Anna"));
+            Assert.That(summaryResponse.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(sessionSummary.GetProperty("activeBookingCount").GetInt32(), Is.EqualTo(1));
+            Assert.That(sessionSummary.GetProperty("availableSeats").GetInt32(), Is.EqualTo(CourseSession.StandardCapacity - 1));
+            Assert.That(sessionSummary.GetProperty("bookingHistoryCount").GetInt32(), Is.EqualTo(1));
+        });
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.That(await db.Users.CountAsync(), Is.EqualTo(1), "Manual enrollment must not create a password-based account.");
+        Assert.That(await db.StudentProfiles.CountAsync(), Is.EqualTo(1));
+        Assert.That((await db.StudentProfiles.SingleAsync()).UserId, Is.Null);
+    }
+
+    [Test]
+    public async Task AdminCourseSessions_WhenStaffBooksExistingStudent_ReusesAccountAndCreatesMissingProfile()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var courseId = await factory.SeedCourseAsync(CourseType.RiskettanMC);
+        var session = await factory.SeedCourseSessionAsync(courseId, isPublished: true);
+        var studentPassword = NewTestPassword();
+        await factory.SeedUserAsync("existing@example.com", studentPassword, ApplicationRoles.Student);
+        string studentUserId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var studentUser = await db.Users.SingleAsync(x => x.Email == "existing@example.com");
+            studentUserId = studentUser.Id;
+        }
+        await SignInAsync(factory, client, "admin@example.com", ApplicationRoles.Admin);
+
+        var response = await client.PostAsJsonAsync($"/api/admin/course-sessions/{session.Id}/bookings", new
+        {
+            firstName = "Erik",
+            lastName = "Ek",
+            phone = "0701234567",
+            email = "EXISTING@example.com",
+        });
+
+        using var verifyScope = factory.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(verifyDb.StudentProfiles.Count(), Is.EqualTo(1));
+            Assert.That(verifyDb.Users.Count(), Is.EqualTo(2));
+            Assert.That(verifyDb.StudentProfiles.Single().UserId, Is.EqualTo(studentUserId));
+            Assert.That(verifyDb.CourseBookings.Single().StudentProfileId, Is.EqualTo(verifyDb.StudentProfiles.Single().Id));
+        });
+    }
+
     [Test]
     public async Task AdminCourseSessions_WhenStudentRequestsList_ReturnsForbidden()
     {
@@ -351,6 +434,13 @@ public class AuthIntegrationTests
         var cancelBooking = await client.PostAsync($"/api/admin/course-sessions/{session.Id}/bookings/{Guid.NewGuid()}/cancel", null);
         var cancelSession = await client.PostAsync($"/api/admin/course-sessions/{session.Id}/cancel", null);
         var archiveSession = await client.PostAsync($"/api/admin/course-sessions/{session.Id}/archive", null);
+        var manualBooking = await client.PostAsJsonAsync($"/api/admin/course-sessions/{session.Id}/bookings", new
+        {
+            firstName = "Student",
+            lastName = "Person",
+            phone = "0701234567",
+            email = "newstudent@example.com",
+        });
 
         Assert.Multiple(() =>
         {
@@ -358,6 +448,7 @@ public class AuthIntegrationTests
             Assert.That(cancelBooking.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
             Assert.That(cancelSession.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
             Assert.That(archiveSession.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+            Assert.That(manualBooking.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
         });
     }
 
@@ -380,6 +471,13 @@ public class AuthIntegrationTests
             }),
             await client.PutAsJsonAsync($"/api/admin/course-sessions/{sessionId}", new { capacity = 10 }),
             await client.PostAsync($"/api/admin/course-sessions/{sessionId}/publish", null),
+            await client.PostAsJsonAsync($"/api/admin/course-sessions/{sessionId}/bookings", new
+            {
+                firstName = "No",
+                lastName = "Token",
+                phone = "0701234567",
+                email = "no-token@example.com",
+            }),
             await client.PostAsync($"/api/admin/course-sessions/{sessionId}/unpublish", null),
             await client.PostAsync($"/api/admin/course-sessions/{sessionId}/archive", null),
             await client.DeleteAsync($"/api/admin/course-sessions/{sessionId}"),
@@ -691,6 +789,8 @@ public class AuthIntegrationTests
         bool IsPublished,
         bool IsCancelled,
         bool IsArchived,
+        int ActiveBookingCount,
+        int AvailableSeats,
         int BookingHistoryCount);
 
     private sealed record AdminCourseResponse(Guid Id, string Type, string Title, decimal Price, bool IsActive);

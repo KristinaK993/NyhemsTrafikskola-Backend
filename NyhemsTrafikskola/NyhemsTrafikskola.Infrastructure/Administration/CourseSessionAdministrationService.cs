@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
 using System.Data;
 using NyhemsTrafikskola.Application.Administration;
 using NyhemsTrafikskola.Domain;
@@ -146,16 +147,32 @@ public sealed class CourseSessionAdministrationService : ICourseSessionAdministr
             .Where(x => x.IsArchived == archived)
             .ToListAsync(cancellationToken);
         var sessionIds = sessions.Select(x => x.Id).ToArray();
-        var historyCounts = await _dbContext.CourseBookings
+        var now = DateTimeOffset.UtcNow;
+        var bookingStatuses = await _dbContext.CourseBookings
             .AsNoTracking()
             .Where(x => sessionIds.Contains(x.CourseSessionId))
+            .Select(x => new { x.CourseSessionId, x.Status, x.ExpiresAt })
+            .ToListAsync(cancellationToken);
+        var bookingCounts = bookingStatuses
             .GroupBy(x => x.CourseSessionId)
-            .Select(group => new { CourseSessionId = group.Key, Count = group.Count() })
-            .ToDictionaryAsync(x => x.CourseSessionId, x => x.Count, cancellationToken);
+            .ToDictionary(
+                group => group.Key,
+                group => (
+                    History: group.Count(),
+                    Active: group.Count(x => x.Status == BookingStatus.Confirmed
+                        || (x.Status == BookingStatus.Pending && (!x.ExpiresAt.HasValue || x.ExpiresAt.Value > now)))));
 
         return sessions
             .OrderBy(x => x.StartTime)
-            .Select(x => new CourseSessionAdminSummary(x, historyCounts.GetValueOrDefault(x.Id)))
+            .Select(session =>
+            {
+                var counts = bookingCounts.GetValueOrDefault(session.Id);
+                var activeBookingCount = counts.Active;
+                var availableSeats = session.IsCancelled || session.IsArchived
+                    ? 0
+                    : Math.Max(0, CourseSession.StandardCapacity - activeBookingCount);
+                return new CourseSessionAdminSummary(session, counts.History, activeBookingCount, availableSeats);
+            })
             .ToList();
     }
 
@@ -177,6 +194,104 @@ public sealed class CourseSessionAdministrationService : ICourseSessionAdministr
         bookings = bookings.OrderBy(x => x.CreatedAt).ToList();
 
         return await CreateAdminDetailsAsync(session, bookings, cancellationToken);
+    }
+
+    public async Task<CourseSessionAdminDetails> BookStudentAsync(
+        Guid courseSessionId,
+        string firstName,
+        string lastName,
+        string phone,
+        string email,
+        CancellationToken cancellationToken = default)
+    {
+        firstName = ValidateManualBookingText(firstName, "first name", 100);
+        lastName = ValidateManualBookingText(lastName, "last name", 100);
+        phone = ValidateManualBookingText(phone, "phone number", 50);
+        email = ValidateManualBookingText(email, "email address", 200);
+
+        if (!new EmailAddressAttribute().IsValid(email))
+        {
+            throw new ArgumentException("Enter a valid email address.", nameof(email));
+        }
+
+        if (!new PhoneAttribute().IsValid(phone))
+        {
+            throw new ArgumentException("Enter a valid phone number.", nameof(phone));
+        }
+
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        var session = await GetLockedSessionAsync(courseSessionId, cancellationToken);
+
+        if (session.IsCancelled)
+        {
+            throw new InvalidOperationException("A cancelled course session cannot accept bookings.");
+        }
+
+        if (session.IsArchived)
+        {
+            throw new InvalidOperationException("An archived course session cannot accept bookings.");
+        }
+
+        var normalizedEmail = email.ToUpperInvariant();
+        var existingStudentUserId = await (
+            from user in _dbContext.Users
+            join userRole in _dbContext.UserRoles on user.Id equals userRole.UserId
+            join role in _dbContext.Roles on userRole.RoleId equals role.Id
+            where user.NormalizedEmail == normalizedEmail && role.NormalizedName == "STUDENT"
+            select user.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        var profile = await _dbContext.StudentProfiles
+            .SingleOrDefaultAsync(x => x.Email.ToUpper() == normalizedEmail, cancellationToken);
+
+        if (profile is null && existingStudentUserId is not null)
+        {
+            profile = await _dbContext.StudentProfiles
+                .SingleOrDefaultAsync(x => x.UserId == existingStudentUserId, cancellationToken);
+        }
+
+        var shouldCreateProfile = profile is null;
+        profile ??= StudentProfile.CreateForStaffRegistration(firstName, lastName, email);
+
+        var existingBookings = await _dbContext.CourseBookings
+            .Where(x => x.CourseSessionId == courseSessionId)
+            .ToListAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+
+        if (existingBookings.Any(x => x.CountsTowardCapacity(now)
+            && (x.StudentProfileId == profile.Id || string.Equals(x.Email.Trim(), email, StringComparison.OrdinalIgnoreCase))))
+        {
+            throw new InvalidOperationException("This student already has an active booking for this course session.");
+        }
+
+        var activeBookings = existingBookings.Count(x => x.CountsTowardCapacity(now));
+        if (activeBookings >= CourseSession.StandardCapacity)
+        {
+            throw new InvalidOperationException("This course session is full and cannot accept more bookings.");
+        }
+
+        if (shouldCreateProfile)
+        {
+            profile.UserId = existingStudentUserId;
+            _dbContext.StudentProfiles.Add(profile);
+        }
+        else if (profile.UserId is null && existingStudentUserId is not null)
+        {
+            profile.UserId = existingStudentUserId;
+        }
+
+        var booking = new CourseBooking(
+            session.Id,
+            $"{firstName} {lastName}",
+            email,
+            phone,
+            profile.Id);
+        booking.Confirm();
+        _dbContext.CourseBookings.Add(booking);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        existingBookings.Add(booking);
+        await transaction.CommitAsync(cancellationToken);
+
+        return await CreateAdminDetailsAsync(session, existingBookings, cancellationToken);
     }
 
     public async Task<CourseSessionAdminDetails> CancelBookingAsync(Guid courseSessionId, Guid bookingId, CancellationToken cancellationToken = default)
@@ -343,5 +458,21 @@ public sealed class CourseSessionAdministrationService : ICourseSessionAdministr
             .ToListAsync(cancellationToken);
 
         return bookings.Count(x => x.CountsTowardCapacity(now));
+    }
+
+    private static string ValidateManualBookingText(string? value, string fieldName, int maxLength)
+    {
+        var normalizedValue = value?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedValue))
+        {
+            throw new ArgumentException($"Enter the student's {fieldName}.", fieldName);
+        }
+
+        if (normalizedValue.Length > maxLength)
+        {
+            throw new ArgumentException($"The student's {fieldName} must be {maxLength} characters or fewer.", fieldName);
+        }
+
+        return normalizedValue;
     }
 }

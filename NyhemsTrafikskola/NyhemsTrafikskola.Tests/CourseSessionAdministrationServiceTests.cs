@@ -188,6 +188,76 @@ public class CourseSessionAdministrationServiceTests
     }
 
     [Test]
+    public async Task GetCourseSessionSummariesAsync_CountsOnlyBookingsThatOccupySeats()
+    {
+        await using var context = CreateContext();
+        var service = new CourseSessionAdministrationService(context);
+        var course = new Course(CourseType.RiskettanBil, "Riskettan Bil", 3200m);
+        context.Courses.Add(course);
+        var student = new StudentProfile("Anna", "Andersson", "anna@example.com");
+        context.StudentProfiles.Add(student);
+        await context.SaveChangesAsync();
+        var session = await service.CreateCourseSessionAsync(course.Id, DateTimeOffset.UtcNow.AddDays(5), DateTimeOffset.UtcNow.AddDays(5).AddHours(2), CourseSession.StandardCapacity);
+
+        var confirmed = new CourseBooking(session.Id, "Anna Andersson", student.Email, "0701111111", student.Id);
+        confirmed.Confirm();
+        var activePending = CourseBooking.CreatePendingReservation(session.Id, "Bengt Berg", "bengt@example.com", "0702222222", null, DateTimeOffset.UtcNow.AddMinutes(10));
+        var expiredPending = CourseBooking.CreatePendingReservation(session.Id, "Cecilia Carlsson", "cecilia@example.com", "0703333333", null, DateTimeOffset.UtcNow.AddMinutes(-10));
+        var cancelled = new CourseBooking(session.Id, "David Dahl", "david@example.com", "0704444444");
+        cancelled.Cancel();
+        context.CourseBookings.AddRange(confirmed, activePending, expiredPending, cancelled);
+        await context.SaveChangesAsync();
+
+        var summary = (await service.GetCourseSessionSummariesAsync(archived: false)).Single();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(summary.BookingHistoryCount, Is.EqualTo(4));
+            Assert.That(summary.ActiveBookingCount, Is.EqualTo(2));
+            Assert.That(summary.AvailableSeats, Is.EqualTo(CourseSession.StandardCapacity - 2));
+        });
+    }
+
+    [TestCase(0, 0, 16)]
+    [TestCase(1, 1, 15)]
+    [TestCase(16, 16, 0)]
+    public async Task GetCourseSessionSummariesAsync_ReturnsCorrectBookedAndAvailableCounts(int activeCount, int expectedBooked, int expectedAvailable)
+    {
+        await using var context = CreateContext();
+        var service = new CourseSessionAdministrationService(context);
+        var course = new Course(CourseType.RiskettanBil, "Riskettan Bil", 3200m);
+        context.Courses.Add(course);
+        await context.SaveChangesAsync();
+        var session = await service.CreateCourseSessionAsync(course.Id, DateTimeOffset.UtcNow.AddDays(5), DateTimeOffset.UtcNow.AddDays(5).AddHours(2), CourseSession.StandardCapacity);
+        var students = Enumerable.Range(0, activeCount)
+            .Select(index => new StudentProfile($"Student{index}", "Test", $"student{index}@example.com"))
+            .ToArray();
+        context.StudentProfiles.AddRange(students);
+        await context.SaveChangesAsync();
+
+        var activeBookings = students.Select(student =>
+        {
+            var booking = new CourseBooking(session.Id, $"{student.FirstName} {student.LastName}", student.Email, "0701234567", student.Id);
+            booking.Confirm();
+            return booking;
+        });
+        var cancelled = new CourseBooking(session.Id, "Cancelled Student", "cancelled@example.com", "0701234567");
+        cancelled.Cancel();
+        var expiredPending = CourseBooking.CreatePendingReservation(session.Id, "Expired Student", "expired@example.com", "0701234567", null, DateTimeOffset.UtcNow.AddMinutes(-5));
+        context.CourseBookings.AddRange(activeBookings.Append(cancelled).Append(expiredPending));
+        await context.SaveChangesAsync();
+
+        var summary = (await service.GetCourseSessionSummariesAsync(archived: false)).Single();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(summary.ActiveBookingCount, Is.EqualTo(expectedBooked));
+            Assert.That(summary.AvailableSeats, Is.EqualTo(expectedAvailable));
+            Assert.That(summary.BookingHistoryCount, Is.EqualTo(activeCount + 2));
+        });
+    }
+
+    [Test]
     public async Task ArchiveCourseSessionAsync_WithoutHistoryIsRejected()
     {
         await using var context = CreateContext();
@@ -291,6 +361,161 @@ public class CourseSessionAdministrationServiceTests
         var bookingService = new CourseBookingService(context);
         Assert.That(await bookingService.GetAvailableSeatsAsync(session.Id), Is.Zero);
         Assert.ThrowsAsync<InvalidOperationException>(async () => await bookingService.CreatePendingReservationAsync(session.Id, "Frida F", "frida@example.com", "0706666666"));
+    }
+
+    [Test]
+    public async Task BookStudentAsync_WithoutExistingAccount_CreatesConfirmedBookingAndProfile()
+    {
+        await using var context = CreateContext();
+        var service = new CourseSessionAdministrationService(context);
+        var course = new Course(CourseType.RiskettanBil, "Riskettan Bil", 3200m);
+        context.Courses.Add(course);
+        await context.SaveChangesAsync();
+        var session = await service.CreateCourseSessionAsync(course.Id, DateTimeOffset.UtcNow.AddDays(4), DateTimeOffset.UtcNow.AddDays(4).AddHours(2), CourseSession.StandardCapacity);
+
+        var details = await service.BookStudentAsync(session.Id, "  Anna ", " Andersson ", "070 123 45 67", " ANNA@example.com ");
+        var booking = await context.CourseBookings.SingleAsync();
+        var profile = await context.StudentProfiles.SingleAsync();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(details.ActiveBookingCount, Is.EqualTo(1));
+            Assert.That(details.AvailableSeats, Is.EqualTo(15));
+            Assert.That(details.Bookings.Single().Status, Is.EqualTo(nameof(BookingStatus.Confirmed)));
+            Assert.That(details.Bookings.Single().FirstName, Is.EqualTo("Anna"));
+            Assert.That(details.Bookings.Single().LastName, Is.EqualTo("Andersson"));
+            Assert.That(booking.CustomerName, Is.EqualTo("Anna Andersson"));
+            Assert.That(booking.StudentProfileId, Is.EqualTo(profile.Id));
+            Assert.That(profile.UserId, Is.Null);
+            Assert.That(context.Users, Is.Empty);
+        });
+    }
+
+    [Test]
+    public async Task BookStudentAsync_WhenStudentProfileExists_ReusesItCaseInsensitively()
+    {
+        await using var context = CreateContext();
+        var service = new CourseSessionAdministrationService(context);
+        var course = new Course(CourseType.RiskettanMC, "Riskettan MC", 3500m);
+        context.Courses.Add(course);
+        var profile = StudentProfile.CreateForStaffRegistration("Sara", "Svensson", "sara@example.com");
+        context.StudentProfiles.Add(profile);
+        await context.SaveChangesAsync();
+        var session = await service.CreateCourseSessionAsync(course.Id, DateTimeOffset.UtcNow.AddDays(4), DateTimeOffset.UtcNow.AddDays(4).AddHours(2), CourseSession.StandardCapacity);
+
+        await service.BookStudentAsync(session.Id, "Sara", "Svensson", "0701234567", "SARA@example.com");
+
+        Assert.That(await context.StudentProfiles.CountAsync(), Is.EqualTo(1));
+        Assert.That((await context.CourseBookings.SingleAsync()).StudentProfileId, Is.EqualTo(profile.Id));
+    }
+
+    [Test]
+    public async Task BookStudentAsync_WhenStudentAlreadyHasActiveBooking_RejectsDuplicate()
+    {
+        await using var context = CreateContext();
+        var service = new CourseSessionAdministrationService(context);
+        var course = new Course(CourseType.RiskettanBil, "Riskettan Bil", 3200m);
+        context.Courses.Add(course);
+        await context.SaveChangesAsync();
+        var session = await service.CreateCourseSessionAsync(course.Id, DateTimeOffset.UtcNow.AddDays(4), DateTimeOffset.UtcNow.AddDays(4).AddHours(2), CourseSession.StandardCapacity);
+        var existing = new CourseBooking(session.Id, "Different Recorded Name", "same@example.com", "0701111111");
+        context.CourseBookings.Add(existing);
+        await context.SaveChangesAsync();
+
+        var exception = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await service.BookStudentAsync(session.Id, "Same", "Student", "0702222222", "SAME@example.com"));
+
+        Assert.That(exception!.Message, Does.Contain("already has an active booking"));
+        Assert.That(await context.CourseBookings.CountAsync(), Is.EqualTo(1));
+        Assert.That(await context.StudentProfiles.CountAsync(), Is.Zero);
+    }
+
+    [TestCase("not-an-email", "0701234567", "email")]
+    [TestCase("valid@example.com", "not-a-phone", "phone")]
+    public async Task BookStudentAsync_InvalidContactDetailsAreRejected(string email, string phone, string expectedMessage)
+    {
+        await using var context = CreateContext();
+        var service = new CourseSessionAdministrationService(context);
+        var course = new Course(CourseType.RiskettanBil, "Riskettan Bil", 3200m);
+        context.Courses.Add(course);
+        await context.SaveChangesAsync();
+        var session = await service.CreateCourseSessionAsync(course.Id, DateTimeOffset.UtcNow.AddDays(4), DateTimeOffset.UtcNow.AddDays(4).AddHours(2), CourseSession.StandardCapacity);
+
+        var exception = Assert.ThrowsAsync<ArgumentException>(async () =>
+            await service.BookStudentAsync(session.Id, "Anna", "Andersson", phone, email));
+
+        Assert.That(exception!.Message, Does.Contain(expectedMessage));
+        Assert.That(await context.CourseBookings.CountAsync(), Is.Zero);
+        Assert.That(await context.StudentProfiles.CountAsync(), Is.Zero);
+    }
+
+    [Test]
+    public async Task BookStudentAsync_SeventeenthActiveBookingIsRejected()
+    {
+        await using var context = CreateContext();
+        var service = new CourseSessionAdministrationService(context);
+        var course = new Course(CourseType.RiskettanBil, "Riskettan Bil", 3200m);
+        context.Courses.Add(course);
+        await context.SaveChangesAsync();
+        var session = await service.CreateCourseSessionAsync(course.Id, DateTimeOffset.UtcNow.AddDays(4), DateTimeOffset.UtcNow.AddDays(4).AddHours(2), CourseSession.StandardCapacity);
+        context.CourseBookings.AddRange(Enumerable.Range(0, CourseSession.StandardCapacity)
+            .Select(index => new CourseBooking(session.Id, $"Student {index}", $"student{index}@example.com", "0701111111")));
+        await context.SaveChangesAsync();
+
+        var exception = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await service.BookStudentAsync(session.Id, "Seventeenth", "Student", "0702222222", "student17@example.com"));
+
+        Assert.That(exception!.Message, Does.Contain("course session is full"));
+        Assert.That(await context.CourseBookings.CountAsync(), Is.EqualTo(CourseSession.StandardCapacity));
+        Assert.That(await context.StudentProfiles.CountAsync(), Is.Zero);
+    }
+
+    [TestCase(true, false, "cancelled")]
+    [TestCase(false, true, "archived")]
+    public async Task BookStudentAsync_CancelledOrArchivedSessionIsRejected(bool cancelled, bool archived, string expectedMessage)
+    {
+        await using var context = CreateContext();
+        var service = new CourseSessionAdministrationService(context);
+        var course = new Course(CourseType.RiskettanBil, "Riskettan Bil", 3200m);
+        context.Courses.Add(course);
+        await context.SaveChangesAsync();
+        var session = await service.CreateCourseSessionAsync(course.Id, DateTimeOffset.UtcNow.AddDays(4), DateTimeOffset.UtcNow.AddDays(4).AddHours(2), CourseSession.StandardCapacity);
+        if (cancelled)
+        {
+            await service.CancelCourseSessionAsync(session.Id);
+        }
+        if (archived)
+        {
+            await service.BookStudentAsync(session.Id, "Prior", "Student", "0701111111", "prior@example.com");
+            await service.ArchiveCourseSessionAsync(session.Id);
+        }
+
+        var exception = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await service.BookStudentAsync(session.Id, "New", "Student", "0702222222", "new@example.com"));
+
+        Assert.That(exception!.Message, Does.Contain(expectedMessage));
+    }
+
+    [Test]
+    public async Task BookStudentAsync_CancelledBookingRemainsInHistoryAndFreesPlace()
+    {
+        await using var context = CreateContext();
+        var service = new CourseSessionAdministrationService(context);
+        var course = new Course(CourseType.RiskettanBil, "Riskettan Bil", 3200m);
+        context.Courses.Add(course);
+        await context.SaveChangesAsync();
+        var session = await service.CreateCourseSessionAsync(course.Id, DateTimeOffset.UtcNow.AddDays(4), DateTimeOffset.UtcNow.AddDays(4).AddHours(2), CourseSession.StandardCapacity);
+        var booked = await service.BookStudentAsync(session.Id, "Eva", "Ek", "0701234567", "eva@example.com");
+
+        var afterCancel = await service.CancelBookingAsync(session.Id, booked.Bookings.Single().Id);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(afterCancel.ActiveBookingCount, Is.Zero);
+            Assert.That(afterCancel.AvailableSeats, Is.EqualTo(CourseSession.StandardCapacity));
+            Assert.That(afterCancel.Bookings, Has.Count.EqualTo(1));
+            Assert.That(afterCancel.Bookings.Single().Status, Is.EqualTo(nameof(BookingStatus.Cancelled)));
+        });
     }
 
     private static ApplicationDbContext CreateContext()

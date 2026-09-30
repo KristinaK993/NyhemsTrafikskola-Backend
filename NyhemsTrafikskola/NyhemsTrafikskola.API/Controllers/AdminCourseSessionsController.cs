@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json.Serialization;
 using NyhemsTrafikskola.Application.Administration;
 using NyhemsTrafikskola.Domain;
 
@@ -21,7 +22,7 @@ public sealed class AdminCourseSessionsController : ControllerBase
     public async Task<ActionResult<IReadOnlyCollection<CourseSessionAdminResponse>>> GetAll([FromQuery] bool archived = false, CancellationToken cancellationToken = default)
     {
         var sessions = await _administrationService.GetCourseSessionSummariesAsync(archived, cancellationToken);
-        return Ok(sessions.Select(x => CourseSessionAdminResponse.From(x.Session, x.BookingHistoryCount)));
+        return Ok(sessions.Select(CourseSessionAdminResponse.From));
     }
 
     [HttpGet("{courseSessionId:guid}")]
@@ -35,6 +36,33 @@ public sealed class AdminCourseSessionsController : ControllerBase
         catch (InvalidOperationException exception)
         {
             return NotFound(new { message = exception.Message });
+        }
+    }
+
+    [HttpPost("{courseSessionId:guid}/bookings")]
+    public async Task<ActionResult<CourseSessionAdminDetailsResponse>> BookStudent(
+        Guid courseSessionId,
+        [FromBody] ManualBookingRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var details = await _administrationService.BookStudentAsync(
+                courseSessionId,
+                request.FirstName ?? string.Empty,
+                request.LastName ?? string.Empty,
+                request.Phone ?? string.Empty,
+                request.Email ?? string.Empty,
+                cancellationToken);
+            return Ok(CourseSessionAdminDetailsResponse.From(details));
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Conflict(new { message = exception.Message });
         }
     }
 
@@ -103,7 +131,7 @@ public sealed class AdminCourseSessionsController : ControllerBase
                 request.IsPublished,
                 cancellationToken);
 
-            return Created("/api/admin/course-sessions", CourseSessionAdminResponse.From(session));
+            return Created("/api/admin/course-sessions", await CreateCourseSessionAdminResponseAsync(session, cancellationToken));
         }
         catch (ArgumentException exception)
         {
@@ -135,7 +163,7 @@ public sealed class AdminCourseSessionsController : ControllerBase
                 CourseSession.StandardCapacity,
                 cancellationToken);
 
-            return Ok(CourseSessionAdminResponse.From(session));
+            return Ok(await CreateCourseSessionAdminResponseAsync(session, cancellationToken));
         }
         catch (ArgumentException exception)
         {
@@ -189,6 +217,13 @@ public sealed class AdminCourseSessionsController : ControllerBase
         }
     }
 
+    private async Task<CourseSessionAdminResponse> CreateCourseSessionAdminResponseAsync(CourseSession session, CancellationToken cancellationToken)
+    {
+        var summaries = await _administrationService.GetCourseSessionSummariesAsync(session.IsArchived, cancellationToken);
+        var summary = summaries.Single(x => x.Session.Id == session.Id);
+        return CourseSessionAdminResponse.From(summary);
+    }
+
     public sealed record CreateCourseSessionRequest(
         Guid CourseId,
         DateTimeOffset StartTime,
@@ -201,6 +236,12 @@ public sealed class AdminCourseSessionsController : ControllerBase
         DateTimeOffset? EndTime,
         int? Capacity);
 
+    public sealed record ManualBookingRequest(
+        string? FirstName,
+        string? LastName,
+        string? Phone,
+        string? Email);
+
     public sealed record CourseSessionAdminResponse(
         Guid Id,
         Guid CourseId,
@@ -210,18 +251,22 @@ public sealed class AdminCourseSessionsController : ControllerBase
         bool IsPublished,
         bool IsCancelled,
         bool IsArchived,
+        [property: JsonPropertyName("activeBookingCount")] int ActiveBookingCount,
+        [property: JsonPropertyName("availableSeats")] int AvailableSeats,
         int BookingHistoryCount)
     {
-        public static CourseSessionAdminResponse From(CourseSession session, int bookingHistoryCount = 0) => new(
-            session.Id,
-            session.CourseId,
-            session.StartTime,
-            session.EndTime,
+        public static CourseSessionAdminResponse From(CourseSessionAdminSummary summary) => new(
+            summary.Session.Id,
+            summary.Session.CourseId,
+            summary.Session.StartTime,
+            summary.Session.EndTime,
             CourseSession.StandardCapacity,
-            session.IsPublished,
-            session.IsCancelled,
-            session.IsArchived,
-            bookingHistoryCount);
+            summary.Session.IsPublished,
+            summary.Session.IsCancelled,
+            summary.Session.IsArchived,
+            summary.ActiveBookingCount,
+            summary.AvailableSeats,
+            summary.BookingHistoryCount);
     }
 
     public sealed record CourseSessionAdminDetailsResponse(
