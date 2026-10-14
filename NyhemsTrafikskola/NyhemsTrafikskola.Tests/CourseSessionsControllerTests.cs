@@ -129,5 +129,8 @@ public class CourseSessionsControllerTests
 
         public Task<CreateBookingResult> ConfirmPendingReservationAsync(Guid bookingId, Guid studentProfileId, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+
+        public Task CancelStudentBookingAsync(Guid bookingId, IReadOnlyCollection<Guid> ownStudentProfileIds, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
     }
 }

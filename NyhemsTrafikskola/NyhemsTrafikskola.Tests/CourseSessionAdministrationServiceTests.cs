@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using NyhemsTrafikskola.Application.Administration;
+using NyhemsTrafikskola.Application.Bookings;
 using NyhemsTrafikskola.Domain;
 using NyhemsTrafikskola.Infrastructure;
 
@@ -184,7 +185,8 @@ public class CourseSessionAdministrationServiceTests
 
         var bookingService = new CourseBookingService(context);
         Assert.That(await bookingService.GetAvailableSeatsAsync(session.Id), Is.Zero);
-        Assert.ThrowsAsync<InvalidOperationException>(async () => await bookingService.CreatePendingReservationAsync(session.Id, "Bengt Bengtsson", "bengt@example.com", "0702222222"));
+        var bookingException = Assert.ThrowsAsync<CourseBookingException>(async () => await bookingService.CreatePendingReservationAsync(session.Id, "Bengt Bengtsson", "bengt@example.com", "0702222222"));
+        Assert.That(bookingException!.Error, Is.EqualTo(CourseBookingError.SessionArchived));
     }
 
     [Test]
@@ -360,7 +362,8 @@ public class CourseSessionAdministrationServiceTests
 
         var bookingService = new CourseBookingService(context);
         Assert.That(await bookingService.GetAvailableSeatsAsync(session.Id), Is.Zero);
-        Assert.ThrowsAsync<InvalidOperationException>(async () => await bookingService.CreatePendingReservationAsync(session.Id, "Frida F", "frida@example.com", "0706666666"));
+        var bookingException = Assert.ThrowsAsync<CourseBookingException>(async () => await bookingService.CreatePendingReservationAsync(session.Id, "Frida F", "frida@example.com", "0706666666"));
+        Assert.That(bookingException!.Error, Is.EqualTo(CourseBookingError.SessionCancelled));
     }
 
     [Test]

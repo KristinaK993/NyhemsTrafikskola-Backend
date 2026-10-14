@@ -1,8 +1,11 @@
+using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using NyhemsTrafikskola.Application.Authorization;
+using NyhemsTrafikskola.Domain;
 using NyhemsTrafikskola.Infrastructure;
 
 namespace NyhemsTrafikskola.API.Controllers;
@@ -26,6 +29,81 @@ public sealed class AuthController : ControllerBase
         _userManager = userManager;
         _dbContext = dbContext;
         _antiforgery = antiforgery;
+    }
+
+    [HttpPost("register")]
+    [AllowAnonymous]
+    public async Task<IActionResult> Register([FromBody] RegisterRequest request)
+    {
+        if (request is null)
+        {
+            return BadRequest(new { message = "Registration details are required." });
+        }
+
+        var firstName = request.FirstName?.Trim();
+        var lastName = request.LastName?.Trim();
+        var phoneNumber = request.PhoneNumber?.Trim();
+        var email = request.Email?.Trim();
+
+        if (string.IsNullOrWhiteSpace(firstName)
+            || string.IsNullOrWhiteSpace(lastName)
+            || string.IsNullOrWhiteSpace(phoneNumber)
+            || string.IsNullOrWhiteSpace(email)
+            || string.IsNullOrWhiteSpace(request.Password))
+        {
+            return BadRequest(new { message = "First name, last name, phone number, email and password are required." });
+        }
+
+        if (!new EmailAddressAttribute().IsValid(email))
+        {
+            return BadRequest(new { message = "A valid email address is required." });
+        }
+
+        if (!string.Equals(request.Password, request.ConfirmPassword, StringComparison.Ordinal))
+        {
+            return BadRequest(new { message = "Passwords do not match." });
+        }
+
+        if (await _userManager.FindByEmailAsync(email) is not null)
+        {
+            return Conflict(new { message = "An account with this email already exists." });
+        }
+
+        var user = new ApplicationUser
+        {
+            UserName = email,
+            Email = email,
+            FirstName = firstName,
+            LastName = lastName,
+            PhoneNumber = phoneNumber,
+            IsActive = true,
+        };
+
+        var createResult = await _userManager.CreateAsync(user, request.Password);
+        if (!createResult.Succeeded)
+        {
+            var errorMessage = createResult.Errors.FirstOrDefault()?.Description ?? "The account could not be created.";
+            return BadRequest(new { message = errorMessage });
+        }
+
+        var addToRoleResult = await _userManager.AddToRoleAsync(user, ApplicationRoles.Student);
+        if (!addToRoleResult.Succeeded)
+        {
+            await _userManager.DeleteAsync(user);
+            var errorMessage = addToRoleResult.Errors.FirstOrDefault()?.Description ?? "The student role could not be assigned.";
+            return BadRequest(new { message = errorMessage });
+        }
+
+        var profile = StudentProfile.CreateSelfRegistration(firstName, lastName, email);
+        profile.UserId = user.Id;
+
+        _dbContext.StudentProfiles.Add(profile);
+        await _dbContext.SaveChangesAsync();
+
+        await _signInManager.SignInAsync(user, isPersistent: true);
+        IssueAntiforgeryToken();
+
+        return Ok(new { message = "Registration successful." });
     }
 
     [HttpPost("login")]
@@ -96,6 +174,7 @@ public sealed class AuthController : ControllerBase
             Email = user.Email ?? string.Empty,
             FirstName = user.FirstName,
             LastName = user.LastName,
+            PhoneNumber = user.PhoneNumber ?? string.Empty,
             Roles = roles,
             StudentProfileId = studentProfileId,
             InstructorProfileId = instructorProfileId,
@@ -103,6 +182,14 @@ public sealed class AuthController : ControllerBase
     }
 
     public sealed record LoginRequest(string Email, string Password);
+
+    public sealed record RegisterRequest(
+        string FirstName,
+        string LastName,
+        string PhoneNumber,
+        string Email,
+        string Password,
+        string ConfirmPassword);
 
     private void IssueAntiforgeryToken()
     {
@@ -116,6 +203,7 @@ public sealed class AuthController : ControllerBase
         public string Email { get; init; } = string.Empty;
         public string FirstName { get; init; } = string.Empty;
         public string LastName { get; init; } = string.Empty;
+        public string PhoneNumber { get; init; } = string.Empty;
         public IReadOnlyCollection<string> Roles { get; init; } = Array.Empty<string>();
         public Guid? StudentProfileId { get; init; }
         public Guid? InstructorProfileId { get; init; }

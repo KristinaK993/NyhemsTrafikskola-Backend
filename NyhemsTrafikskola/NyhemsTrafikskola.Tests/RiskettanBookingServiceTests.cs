@@ -158,7 +158,7 @@ public class RiskettanBookingServiceTests
             .Select(index => CourseBooking.CreatePendingReservation(session.Id, $"Student {index}", $"student{index}@example.com", "0701111111")));
         await context.SaveChangesAsync();
 
-        var ex = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        var ex = Assert.ThrowsAsync<CourseBookingException>(async () =>
             await service.CreatePendingReservationAsync(
                 session.Id,
                 "C",
@@ -166,6 +166,7 @@ public class RiskettanBookingServiceTests
                 "0703333333"));
 
         Assert.That(ex!.Message, Does.Contain("full"));
+        Assert.That(ex.Error, Is.EqualTo(CourseBookingError.SessionFull));
     }
 
     [Test]
@@ -183,11 +184,17 @@ public class RiskettanBookingServiceTests
         context.CourseSessions.AddRange(publishedFuture, unpublishedFuture, passed);
         await context.SaveChangesAsync();
 
-        Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        var unpublished = Assert.ThrowsAsync<CourseBookingException>(async () =>
             await service.CreatePendingReservationAsync(unpublishedFuture.Id, "Z", "z@example.com", "0709999999"));
 
-        Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        var started = Assert.ThrowsAsync<CourseBookingException>(async () =>
             await service.CreatePendingReservationAsync(passed.Id, "Y", "y@example.com", "0708888888"));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(unpublished!.Error, Is.EqualTo(CourseBookingError.SessionNotPublished));
+            Assert.That(started!.Error, Is.EqualTo(CourseBookingError.SessionStarted));
+        });
     }
 
     [Test]
@@ -228,7 +235,7 @@ public class RiskettanBookingServiceTests
 
         Assert.That(firstResult.Status, Is.EqualTo(BookingStatus.Confirmed));
 
-        var ex = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        var ex = Assert.ThrowsAsync<CourseBookingException>(async () =>
             await service.CreateDirectConfirmedBookingAsync(
                 sessionId.Id,
                 studentId.Id,
@@ -237,6 +244,33 @@ public class RiskettanBookingServiceTests
                 "0702222222"));
 
         Assert.That(ex!.Message, Does.Contain("active booking"));
+        Assert.That(ex.Error, Is.EqualTo(CourseBookingError.AlreadyBooked));
+    }
+
+    [Test]
+    public async Task CreateDirectConfirmedBooking_WhenSameEmailIsBookedOnAnotherProfile_Throws()
+    {
+        await using var context = CreateContext();
+        var service = new CourseBookingService(context);
+
+        var course = new Course(CourseType.RiskettanBil, "Riskettan Bil", 1000m, true);
+        var session = new CourseSession(course.Id, DateTimeOffset.UtcNow.AddDays(3), DateTimeOffset.UtcNow.AddDays(3).AddHours(2), 16, true);
+        var staffCreatedProfile = new StudentProfile("Alice", "Andersson", "alice@example.com");
+        var accountProfile = new StudentProfile("Alice", "Andersson", "alice@example.com");
+        var staffBooking = new CourseBooking(session.Id, "Alice Andersson", "Alice@Example.com", "0701111111", staffCreatedProfile.Id);
+        staffBooking.Confirm();
+
+        context.Courses.Add(course);
+        context.CourseSessions.Add(session);
+        context.StudentProfiles.AddRange(staffCreatedProfile, accountProfile);
+        context.CourseBookings.Add(staffBooking);
+        await context.SaveChangesAsync();
+
+        var ex = Assert.ThrowsAsync<CourseBookingException>(async () =>
+            await service.CreateDirectConfirmedBookingAsync(session.Id, accountProfile.Id, "Alice Andersson", "alice@example.com", "0701111111"));
+
+        Assert.That(ex!.Error, Is.EqualTo(CourseBookingError.AlreadyBooked));
+        Assert.That(await context.StudentProfiles.CountAsync(), Is.EqualTo(2), "Profiles must not be merged or deleted.");
     }
 
     [Test]

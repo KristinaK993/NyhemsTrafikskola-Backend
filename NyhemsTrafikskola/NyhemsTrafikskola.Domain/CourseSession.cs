@@ -4,6 +4,9 @@ public class CourseSession
 {
     public const int StandardCapacity = 16;
 
+    // Students may cancel online until this long before the course starts; after that only by phone.
+    public static readonly TimeSpan OnlineCancellationNotice = TimeSpan.FromDays(2);
+
     public CourseSession(Guid courseId, DateTimeOffset startTime, DateTimeOffset endTime, int capacity, bool isPublished = false)
     {
         CourseId = courseId;
@@ -21,6 +24,10 @@ public class CourseSession
     public bool IsPublished { get; private set; }
     public bool IsCancelled { get; private set; }
     public bool IsArchived { get; private set; }
+
+    public DateTimeOffset GetOnlineCancellationDeadline() => StartTime - OnlineCancellationNotice;
+
+    public bool AllowsOnlineCancellation(DateTimeOffset utcNow) => !IsCancelled && utcNow < GetOnlineCancellationDeadline();
 
     public void Publish()
     {

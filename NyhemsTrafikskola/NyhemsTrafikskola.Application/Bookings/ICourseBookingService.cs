@@ -10,4 +10,5 @@ public interface ICourseBookingService
     Task<CreateBookingResult> CreatePendingReservationAsync(Guid courseSessionId, string customerName, string email, string phone, Guid? studentProfileId = null, CancellationToken cancellationToken = default);
     Task<CreateBookingResult> CreateDirectConfirmedBookingAsync(Guid courseSessionId, Guid studentProfileId, string customerName, string email, string phone, CancellationToken cancellationToken = default);
     Task<CreateBookingResult> ConfirmPendingReservationAsync(Guid bookingId, Guid studentProfileId, CancellationToken cancellationToken = default);
+    Task CancelStudentBookingAsync(Guid bookingId, IReadOnlyCollection<Guid> ownStudentProfileIds, CancellationToken cancellationToken = default);
 }

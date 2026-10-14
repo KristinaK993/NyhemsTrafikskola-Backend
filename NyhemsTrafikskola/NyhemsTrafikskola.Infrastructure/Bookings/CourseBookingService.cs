@@ -117,13 +117,13 @@ public sealed class CourseBookingService : ICourseBookingService
 
         if (duplicateExists)
         {
-            throw new InvalidOperationException("This student already has an active booking for this course session.");
+            throw new CourseBookingException(CourseBookingError.AlreadyBooked, "This student already has an active booking for this course session.");
         }
 
         var occupiedSeats = await CountOccupiedSeatsAsync(courseSessionId, cancellationToken);
         if (occupiedSeats >= CourseSession.StandardCapacity)
         {
-            throw new InvalidOperationException("This course session is full and cannot accept more bookings.");
+            throw new CourseBookingException(CourseBookingError.SessionFull, "This course session is full and cannot accept more bookings.");
         }
 
         var booking = CourseBooking.CreatePendingReservation(
@@ -166,19 +166,21 @@ public sealed class CourseBookingService : ICourseBookingService
             .Where(x => x.CourseSessionId == courseSessionId && x.Status != BookingStatus.Cancelled)
             .ToListAsync(cancellationToken);
 
+        // Staff-created bookings may belong to a separate, unlinked profile for the same person, so the email is compared as well.
+        var normalizedEmail = email.Trim();
         var duplicateExists = existingBookings.Any(x =>
-            x.StudentProfileId == studentProfileId
+            (x.StudentProfileId == studentProfileId || string.Equals(x.Email.Trim(), normalizedEmail, StringComparison.OrdinalIgnoreCase))
             && (x.Status == BookingStatus.Confirmed || (x.Status == BookingStatus.Pending && x.ExpiresAt > DateTimeOffset.UtcNow)));
 
         if (duplicateExists)
         {
-            throw new InvalidOperationException("This student already has an active booking for this course session.");
+            throw new CourseBookingException(CourseBookingError.AlreadyBooked, "This student already has an active booking for this course session.");
         }
 
         var occupiedSeats = await CountOccupiedSeatsAsync(courseSessionId, cancellationToken);
         if (occupiedSeats >= CourseSession.StandardCapacity)
         {
-            throw new InvalidOperationException("This course session is full and cannot accept more bookings.");
+            throw new CourseBookingException(CourseBookingError.SessionFull, "This course session is full and cannot accept more bookings.");
         }
 
         var booking = new CourseBooking(
@@ -238,7 +240,7 @@ public sealed class CourseBookingService : ICourseBookingService
         var occupiedSeats = await CountOccupiedSeatsAsync(booking.CourseSessionId, cancellationToken);
         if (occupiedSeats > CourseSession.StandardCapacity)
         {
-            throw new InvalidOperationException("This course session is full and cannot accept more bookings.");
+            throw new CourseBookingException(CourseBookingError.SessionFull, "This course session is full and cannot accept more bookings.");
         }
 
         booking.Confirm();
@@ -252,6 +254,35 @@ public sealed class CourseBookingService : ICourseBookingService
             Math.Max(0, CourseSession.StandardCapacity - occupiedSeats));
     }
 
+    public async Task CancelStudentBookingAsync(Guid bookingId, IReadOnlyCollection<Guid> ownStudentProfileIds, CancellationToken cancellationToken = default)
+    {
+        using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
+        var booking = await _dbContext.CourseBookings
+            .SingleOrDefaultAsync(x => x.Id == bookingId, cancellationToken);
+
+        // Only bookings on the student's own linked profiles can be cancelled online; others are reported as not found.
+        if (booking is null || booking.StudentProfileId is null || !ownStudentProfileIds.Contains(booking.StudentProfileId.Value))
+        {
+            throw new CourseBookingException(CourseBookingError.BookingNotFound, "Booking was not found.");
+        }
+
+        if (booking.Status == BookingStatus.Cancelled)
+        {
+            throw new CourseBookingException(CourseBookingError.BookingAlreadyCancelled, "The booking has already been cancelled.");
+        }
+
+        var session = await GetLockedSessionAsync(booking.CourseSessionId, cancellationToken);
+        if (!session.AllowsOnlineCancellation(DateTimeOffset.UtcNow))
+        {
+            throw new CourseBookingException(CourseBookingError.CancellationDeadlinePassed, "The online cancellation deadline has passed.");
+        }
+
+        booking.Cancel();
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     private async Task<CourseSession> GetLockedSessionAsync(Guid courseSessionId, CancellationToken cancellationToken)
     {
         if (_dbContext.Database.IsSqlServer())
@@ -262,7 +293,7 @@ public sealed class CourseBookingService : ICourseBookingService
 
             if (session is null)
             {
-                throw new InvalidOperationException("Course session was not found.");
+                throw new CourseBookingException(CourseBookingError.SessionNotFound, "Course session was not found.");
             }
 
             return session;
@@ -273,7 +304,7 @@ public sealed class CourseBookingService : ICourseBookingService
 
         if (fallbackSession is null)
         {
-            throw new InvalidOperationException("Course session was not found.");
+            throw new CourseBookingException(CourseBookingError.SessionNotFound, "Course session was not found.");
         }
 
         return fallbackSession;
@@ -283,22 +314,22 @@ public sealed class CourseBookingService : ICourseBookingService
     {
         if (session.IsArchived)
         {
-            throw new InvalidOperationException("The course session has been archived and cannot accept bookings.");
+            throw new CourseBookingException(CourseBookingError.SessionArchived, "The course session has been archived and cannot accept bookings.");
         }
 
         if (session.IsCancelled)
         {
-            throw new InvalidOperationException("The course session has been cancelled and cannot accept bookings.");
+            throw new CourseBookingException(CourseBookingError.SessionCancelled, "The course session has been cancelled and cannot accept bookings.");
         }
 
         if (!session.IsPublished)
         {
-            throw new InvalidOperationException("The course session is not published and cannot accept bookings.");
+            throw new CourseBookingException(CourseBookingError.SessionNotPublished, "The course session is not published and cannot accept bookings.");
         }
 
         if (session.StartTime <= DateTimeOffset.UtcNow)
         {
-            throw new InvalidOperationException("The course session has already started or passed and cannot accept new bookings.");
+            throw new CourseBookingException(CourseBookingError.SessionStarted, "The course session has already started or passed and cannot accept new bookings.");
         }
     }
 
