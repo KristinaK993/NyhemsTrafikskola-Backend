@@ -138,6 +138,201 @@ public class AuthIntegrationTests
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
     }
 
+    [TestCase("first", "firstName")]
+    [TestCase("last", "lastName")]
+    [TestCase("email", "email")]
+    [TestCase("phone-letters", "phoneNumber")]
+    [TestCase("phone-too-short", "phoneNumber")]
+    [TestCase("phone-too-long", "phoneNumber")]
+    [TestCase("phone-13-digits", "phoneNumber")]
+    [TestCase("phone-foreign", "phoneNumber")]
+    public async Task Register_WhenDetailsAreInvalid_ReturnsBadRequestForTheFieldWithoutCreatingAccount(string invalidField, string expectedField)
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var email = invalidField == "email" ? $"{new string('a', 190)}@example.com" : "anna.student@example.com";
+
+        var response = await client.PostAsJsonAsync("/api/auth/register", new
+        {
+            firstName = invalidField == "first" ? new string('A', 101) : "Anna",
+            lastName = invalidField == "last" ? new string('A', 101) : "Andersson",
+            phoneNumber = invalidField switch
+            {
+                "phone-letters" => "ring mig",
+                "phone-too-short" => "12345",
+                "phone-too-long" => "0701234567890123",
+                "phone-13-digits" => "0701234567890",
+                "phone-foreign" => "+47 912 34 567",
+                _ => "070-123 45 67",
+            },
+            email,
+            password = "Password123!",
+            confirmPassword = "Password123!",
+        });
+        var error = await response.Content.ReadFromJsonAsync<ApiErrorResponse>();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+            Assert.That(error!.Field, Is.EqualTo(expectedField));
+            Assert.That(error.Message, Is.Not.Empty);
+        });
+        await AssertNoAccountCreatedAsync(factory);
+    }
+
+    [TestCase("firstName")]
+    [TestCase("lastName")]
+    [TestCase("phoneNumber")]
+    [TestCase("email")]
+    [TestCase("password")]
+    public async Task Register_WhenRequiredFieldIsMissing_ReturnsBadRequestForThatField(string missingField)
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        var response = await client.PostAsJsonAsync("/api/auth/register", new
+        {
+            firstName = missingField == "firstName" ? "" : "Anna",
+            lastName = missingField == "lastName" ? " " : "Andersson",
+            phoneNumber = missingField == "phoneNumber" ? "" : "0701234567",
+            email = missingField == "email" ? "" : "anna.student@example.com",
+            password = missingField == "password" ? "" : "Password123!",
+            confirmPassword = "Password123!",
+        });
+        var error = await response.Content.ReadFromJsonAsync<ApiErrorResponse>();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+            Assert.That(error!.Field, Is.EqualTo(missingField));
+        });
+        await AssertNoAccountCreatedAsync(factory);
+    }
+
+    [Test]
+    public async Task Register_WhenPasswordsDoNotMatchOrEmailExists_ReturnsTheMatchingField()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        await factory.SeedUserAsync("taken@example.com", NewTestPassword(), ApplicationRoles.Student);
+
+        var mismatch = await client.PostAsJsonAsync("/api/auth/register", new
+        {
+            firstName = "Anna", lastName = "Andersson", phoneNumber = "0701234567",
+            email = "anna.student@example.com", password = "Password123!", confirmPassword = "Password456!",
+        });
+        var duplicate = await client.PostAsJsonAsync("/api/auth/register", new
+        {
+            firstName = "Anna", lastName = "Andersson", phoneNumber = "0701234567",
+            email = "TAKEN@example.com", password = "Password123!", confirmPassword = "Password123!",
+        });
+        var mismatchError = await mismatch.Content.ReadFromJsonAsync<ApiErrorResponse>();
+        var duplicateError = await duplicate.Content.ReadFromJsonAsync<ApiErrorResponse>();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(mismatchError!.Field, Is.EqualTo("confirmPassword"));
+            Assert.That(duplicate.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+            Assert.That(duplicateError!.Field, Is.EqualTo("email"));
+        });
+    }
+
+    [Test]
+    public async Task Register_WhenPasswordIsWeak_ReturnsSwedishMessageWithoutCreatingAccount()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        var response = await client.PostAsJsonAsync("/api/auth/register", new
+        {
+            firstName = "Anna",
+            lastName = "Andersson",
+            phoneNumber = "0701234567",
+            email = "anna.student@example.com",
+            password = "svagt",
+            confirmPassword = "svagt",
+        });
+        var error = await response.Content.ReadFromJsonAsync<ApiErrorResponse>();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+            Assert.That(error!.Message, Does.Contain("Lösenordet måste vara minst 8 tecken"));
+            Assert.That(error.Field, Is.EqualTo("password"));
+        });
+        await AssertNoAccountCreatedAsync(factory);
+    }
+
+    [TestCase("070-123 45 67")]
+    [TestCase("+46 70-123 45 67")]
+    [TestCase("0046 70 123 45 67")]
+    public async Task Register_WhenPhoneNumberHasCommonSwedishFormatting_IsAccepted(string phoneNumber)
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        var response = await client.PostAsJsonAsync("/api/auth/register", new
+        {
+            firstName = "Anna",
+            lastName = "Andersson",
+            phoneNumber,
+            email = "anna.student@example.com",
+            password = "Password123!",
+            confirmPassword = "Password123!",
+        });
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+    }
+
+    [Test]
+    public async Task Register_WhenALaterStepFails_RollsBackTheAccount()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using (var scope = factory.Services.CreateScope())
+        {
+            // Removing the Student role makes the role assignment fail after the user row has been inserted.
+            var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+            var studentRole = await roleManager.FindByNameAsync(ApplicationRoles.Student);
+            Assert.That(studentRole, Is.Not.Null);
+            await roleManager.DeleteAsync(studentRole!);
+        }
+
+        HttpResponseMessage? response = null;
+        try
+        {
+            response = await client.PostAsJsonAsync("/api/auth/register", new
+            {
+                firstName = "Anna",
+                lastName = "Andersson",
+                phoneNumber = "0701234567",
+                email = "anna.student@example.com",
+                password = "Password123!",
+                confirmPassword = "Password123!",
+            });
+        }
+        catch (Exception)
+        {
+            // The test server may surface the unhandled exception directly; the important part is the database state.
+        }
+
+        Assert.That(response?.StatusCode, Is.Not.EqualTo(HttpStatusCode.OK));
+        await AssertNoAccountCreatedAsync(factory);
+    }
+
+    private static async Task AssertNoAccountCreatedAsync(ApiWebApplicationFactory factory)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var userCount = await db.Users.CountAsync();
+        var profileCount = await db.StudentProfiles.CountAsync();
+        Assert.Multiple(() =>
+        {
+            Assert.That(userCount, Is.EqualTo(0), "No user should remain.");
+            Assert.That(profileCount, Is.EqualTo(0), "No profile should remain.");
+        });
+    }
+
     [Test]
     public async Task Login_WhenCredentialsAreValid_ReturnsOkAndMeReturnsUserInfo()
     {
@@ -1482,7 +1677,7 @@ public class AuthIntegrationTests
 
     private sealed record StudentBookingResponse(Guid BookingId, Guid CourseSessionId, string Status, int AvailableSeats);
 
-    private sealed record ApiErrorResponse(string Code, string Message);
+    private sealed record ApiErrorResponse(string? Code, string Message, string? Field = null);
 
     private sealed record AuthMeResponse
     {

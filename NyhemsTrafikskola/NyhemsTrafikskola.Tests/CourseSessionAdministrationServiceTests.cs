@@ -435,6 +435,8 @@ public class CourseSessionAdministrationServiceTests
 
     [TestCase("not-an-email", "0701234567", "email")]
     [TestCase("valid@example.com", "not-a-phone", "phone")]
+    [TestCase("valid@example.com", "0701234567890", "phone")]
+    [TestCase("valid@example.com", "+47 912 34 567", "phone")]
     public async Task BookStudentAsync_InvalidContactDetailsAreRejected(string email, string phone, string expectedMessage)
     {
         await using var context = CreateContext();

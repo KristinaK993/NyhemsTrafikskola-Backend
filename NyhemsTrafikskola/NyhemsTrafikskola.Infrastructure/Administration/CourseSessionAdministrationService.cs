@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
 using System.Data;
 using NyhemsTrafikskola.Application.Administration;
+using NyhemsTrafikskola.Application.Validation;
 using NyhemsTrafikskola.Domain;
 
 namespace NyhemsTrafikskola.Infrastructure;
@@ -214,7 +215,7 @@ public sealed class CourseSessionAdministrationService : ICourseSessionAdministr
             throw new ArgumentException("Enter a valid email address.", nameof(email));
         }
 
-        if (!new PhoneAttribute().IsValid(phone))
+        if (!SwedishPhoneNumber.IsValid(phone))
         {
             throw new ArgumentException("Enter a valid phone number.", nameof(phone));
         }
