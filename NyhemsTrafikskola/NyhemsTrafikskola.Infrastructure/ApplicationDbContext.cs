@@ -135,6 +135,12 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
                 .IsRequired();
             entity.Property(x => x.CreatedAt)
                 .IsRequired();
+            entity.Property(x => x.CreatedByUserId)
+                .HasMaxLength(450);
+            entity.Property(x => x.TermsVersion)
+                .HasMaxLength(32);
+            entity.Property(x => x.CancelledByUserId)
+                .HasMaxLength(450);
 
             entity.HasIndex(x => x.CourseSessionId);
             entity.HasIndex(x => x.StudentProfileId);

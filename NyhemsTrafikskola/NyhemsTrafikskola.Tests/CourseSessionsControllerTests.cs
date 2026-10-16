@@ -124,13 +124,13 @@ public class CourseSessionsControllerTests
         public Task<CreateBookingResult> CreatePendingReservationAsync(Guid courseSessionId, string customerName, string email, string phone, Guid? studentProfileId = null, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public Task<CreateBookingResult> CreateDirectConfirmedBookingAsync(Guid courseSessionId, Guid studentProfileId, string customerName, string email, string phone, CancellationToken cancellationToken = default)
+        public Task<CreateBookingResult> CreateDirectConfirmedBookingAsync(Guid courseSessionId, Guid studentProfileId, string customerName, string email, string phone, BookingAudit? audit = null, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
         public Task<CreateBookingResult> ConfirmPendingReservationAsync(Guid bookingId, Guid studentProfileId, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public Task CancelStudentBookingAsync(Guid bookingId, IReadOnlyCollection<Guid> ownStudentProfileIds, CancellationToken cancellationToken = default)
+        public Task CancelStudentBookingAsync(Guid bookingId, IReadOnlyCollection<Guid> ownStudentProfileIds, string? cancelledByUserId = null, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
     }
 }

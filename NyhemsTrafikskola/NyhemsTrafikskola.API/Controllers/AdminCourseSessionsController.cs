@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using System.Text.Json.Serialization;
 using NyhemsTrafikskola.Application.Administration;
 using NyhemsTrafikskola.Domain;
@@ -53,6 +54,7 @@ public sealed class AdminCourseSessionsController : ControllerBase
                 request.LastName ?? string.Empty,
                 request.Phone ?? string.Empty,
                 request.Email ?? string.Empty,
+                CurrentUserId,
                 cancellationToken);
             return Ok(CourseSessionAdminDetailsResponse.From(details));
         }
@@ -74,7 +76,7 @@ public sealed class AdminCourseSessionsController : ControllerBase
     {
         try
         {
-            var details = await _administrationService.CancelBookingAsync(courseSessionId, bookingId, cancellationToken);
+            var details = await _administrationService.CancelBookingAsync(courseSessionId, bookingId, CurrentUserId, cancellationToken);
             return Ok(CourseSessionAdminDetailsResponse.From(details));
         }
         catch (InvalidOperationException exception)
@@ -88,7 +90,7 @@ public sealed class AdminCourseSessionsController : ControllerBase
     {
         try
         {
-            var details = await _administrationService.CancelCourseSessionAsync(courseSessionId, cancellationToken);
+            var details = await _administrationService.CancelCourseSessionAsync(courseSessionId, CurrentUserId, cancellationToken);
             return Ok(CourseSessionAdminDetailsResponse.From(details));
         }
         catch (InvalidOperationException exception)
@@ -217,6 +219,8 @@ public sealed class AdminCourseSessionsController : ControllerBase
         }
     }
 
+    private string? CurrentUserId => User.FindFirstValue(ClaimTypes.NameIdentifier);
+
     private async Task<CourseSessionAdminResponse> CreateCourseSessionAdminResponseAsync(CourseSession session, CancellationToken cancellationToken)
     {
         var summaries = await _administrationService.GetCourseSessionSummariesAsync(session.IsArchived, cancellationToken);
@@ -297,7 +301,15 @@ public sealed class AdminCourseSessionsController : ControllerBase
         string Phone,
         DateTimeOffset CreatedAt,
         string Status,
-        bool CountsTowardCapacity)
+        bool CountsTowardCapacity,
+        bool BookedOnline,
+        string? BookedByName,
+        DateTimeOffset? TermsAcceptedAt,
+        string? TermsVersion,
+        DateTimeOffset? CancelledAt,
+        string? CancellationReason,
+        string? CancelledByName,
+        bool IsLateCancellation)
     {
         public static CourseBookingAdminResponse From(CourseBookingAdminDetails booking) => new(
             booking.Id,
@@ -308,6 +320,14 @@ public sealed class AdminCourseSessionsController : ControllerBase
             booking.Phone,
             booking.CreatedAt,
             booking.Status,
-            booking.CountsTowardCapacity);
+            booking.CountsTowardCapacity,
+            booking.BookedOnline,
+            booking.BookedByName,
+            booking.TermsAcceptedAt,
+            booking.TermsVersion,
+            booking.CancelledAt,
+            booking.CancellationReason,
+            booking.CancelledByName,
+            booking.IsLateCancellation);
     }
 }

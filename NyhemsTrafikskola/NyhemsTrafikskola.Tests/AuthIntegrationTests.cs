@@ -1096,6 +1096,7 @@ public class AuthIntegrationTests
         var response = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new
         {
             termsAccepted = true,
+            termsVersion = BookingTerms.CurrentVersion,
             studentProfileId = otherProfile.Id,
         });
         var payload = await response.Content.ReadFromJsonAsync<StudentBookingResponse>();
@@ -1130,8 +1131,8 @@ public class AuthIntegrationTests
         var session = await factory.SeedCourseSessionAsync(courseId, isPublished: true);
         await RegisterStudentAsync(factory, client, "anna.student@example.com");
 
-        var first = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true });
-        var second = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true });
+        var first = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion });
+        var second = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion });
         var error = await second.Content.ReadFromJsonAsync<ApiErrorResponse>();
 
         Assert.Multiple(() =>
@@ -1162,7 +1163,7 @@ public class AuthIntegrationTests
         }
         await RegisterStudentAsync(factory, client, "anna.student@example.com");
 
-        var response = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true });
+        var response = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion });
         var error = await response.Content.ReadFromJsonAsync<ApiErrorResponse>();
 
         using var verifyScope = factory.Services.CreateScope();
@@ -1188,7 +1189,7 @@ public class AuthIntegrationTests
         await factory.AddConfirmedBookingsAsync(session.Id, CourseSession.StandardCapacity);
         await RegisterStudentAsync(factory, client, "anna.student@example.com");
 
-        var response = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true });
+        var response = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion });
         var error = await response.Content.ReadFromJsonAsync<ApiErrorResponse>();
 
         Assert.Multiple(() =>
@@ -1242,7 +1243,7 @@ public class AuthIntegrationTests
         }
         await RegisterStudentAsync(factory, client, "anna.student@example.com");
 
-        var response = await client.PostAsJsonAsync($"/api/course-sessions/{sessionId}/bookings", new { termsAccepted = true });
+        var response = await client.PostAsJsonAsync($"/api/course-sessions/{sessionId}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion });
         var error = await response.Content.ReadFromJsonAsync<ApiErrorResponse>();
 
         Assert.Multiple(() =>
@@ -1262,7 +1263,7 @@ public class AuthIntegrationTests
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         await RegisterStudentAsync(factory, client, "anna.student@example.com");
 
-        var response = await client.PostAsJsonAsync($"/api/course-sessions/{Guid.NewGuid()}/bookings", new { termsAccepted = true });
+        var response = await client.PostAsJsonAsync($"/api/course-sessions/{Guid.NewGuid()}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion });
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
     }
@@ -1275,7 +1276,7 @@ public class AuthIntegrationTests
         var courseId = await factory.SeedCourseAsync(CourseType.RiskettanBil);
         var session = await factory.SeedCourseSessionAsync(courseId, isPublished: true);
 
-        var response = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true });
+        var response = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion });
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
         Assert.That(await factory.CountBookingsAsync(session.Id), Is.EqualTo(0));
@@ -1291,7 +1292,7 @@ public class AuthIntegrationTests
         var session = await factory.SeedCourseSessionAsync(courseId, isPublished: true);
         await SignInAsync(factory, client, $"{role.ToLowerInvariant()}@example.com", role);
 
-        var response = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true });
+        var response = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion });
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
         Assert.That(await factory.CountBookingsAsync(session.Id), Is.EqualTo(0));
@@ -1306,7 +1307,7 @@ public class AuthIntegrationTests
         var session = await factory.SeedCourseSessionAsync(courseId, isPublished: true);
         await RegisterStudentAsync(factory, client, "anna.student@example.com", addCsrfHeader: false);
 
-        var response = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true });
+        var response = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion });
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
         Assert.That(await factory.CountBookingsAsync(session.Id), Is.EqualTo(0));
@@ -1341,7 +1342,7 @@ public class AuthIntegrationTests
         var session = await factory.SeedCourseSessionAsync(courseId, isPublished: true);
         await SignInAsync(factory, client, "student@example.com", ApplicationRoles.Student);
 
-        var response = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true });
+        var response = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion });
         var error = await response.Content.ReadFromJsonAsync<ApiErrorResponse>();
 
         Assert.Multiple(() =>
@@ -1372,7 +1373,7 @@ public class AuthIntegrationTests
         var me = await client.GetAsync("/api/auth/me");
         client.DefaultRequestHeaders.Add("X-XSRF-TOKEN", factory.GetAntiforgeryTokenFromResponse(me));
 
-        var response = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true });
+        var response = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion });
         var error = await response.Content.ReadFromJsonAsync<ApiErrorResponse>();
 
         Assert.Multiple(() =>
@@ -1420,7 +1421,7 @@ public class AuthIntegrationTests
             staffBookingId = staffBooking.Id;
         }
         await RegisterStudentAsync(factory, client, "anna.student@example.com");
-        var created = await client.PostAsJsonAsync($"/api/course-sessions/{ownSession.Id}/bookings", new { termsAccepted = true });
+        var created = await client.PostAsJsonAsync($"/api/course-sessions/{ownSession.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion });
         var createdBooking = await created.Content.ReadFromJsonAsync<StudentBookingResponse>();
 
         var response = await client.GetAsync("/api/student/bookings");
@@ -1484,7 +1485,7 @@ public class AuthIntegrationTests
         var courseId = await factory.SeedCourseAsync(CourseType.RiskettanBil);
         var session = await CreatePublishedSessionAsync(factory, courseId, TimeSpan.FromDays(5));
         await RegisterStudentAsync(factory, client, "anna.student@example.com");
-        var created = await (await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true }))
+        var created = await (await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion }))
             .Content.ReadFromJsonAsync<StudentBookingResponse>();
 
         var before = await client.GetFromJsonAsync<StudentBookingListItem[]>("/api/student/bookings");
@@ -1511,7 +1512,7 @@ public class AuthIntegrationTests
         var courseId = await factory.SeedCourseAsync(CourseType.RiskettanBil);
         var session = await CreatePublishedSessionAsync(factory, courseId, TimeSpan.FromDays(1));
         await RegisterStudentAsync(factory, client, "anna.student@example.com");
-        var created = await (await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true }))
+        var created = await (await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion }))
             .Content.ReadFromJsonAsync<StudentBookingResponse>();
 
         var list = await client.GetFromJsonAsync<StudentBookingListItem[]>("/api/student/bookings");
@@ -1576,7 +1577,7 @@ public class AuthIntegrationTests
         var courseId = await factory.SeedCourseAsync(CourseType.RiskettanBil);
         var session = await CreatePublishedSessionAsync(factory, courseId, TimeSpan.FromDays(5));
         await RegisterStudentAsync(factory, client, "anna.student@example.com");
-        var created = await (await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true }))
+        var created = await (await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion }))
             .Content.ReadFromJsonAsync<StudentBookingResponse>();
 
         var first = await client.PostAsync($"/api/student/bookings/{created!.BookingId}/cancel", null);
@@ -1599,7 +1600,7 @@ public class AuthIntegrationTests
         var courseId = await factory.SeedCourseAsync(CourseType.RiskettanBil);
         var session = await CreatePublishedSessionAsync(factory, courseId, TimeSpan.FromDays(5));
         await RegisterStudentAsync(factory, client, "anna.student@example.com");
-        var created = await (await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true }))
+        var created = await (await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion }))
             .Content.ReadFromJsonAsync<StudentBookingResponse>();
         client.DefaultRequestHeaders.Remove("X-XSRF-TOKEN");
 
@@ -1631,6 +1632,195 @@ public class AuthIntegrationTests
         var response = await client.PostAsync($"/api/student/bookings/{Guid.NewGuid()}/cancel", null);
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Forbidden));
+    }
+
+    [Test]
+    public async Task StudentBooking_RecordsTermsAcceptanceAndCreator()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var courseId = await factory.SeedCourseAsync(CourseType.RiskettanBil);
+        var session = await CreatePublishedSessionAsync(factory, courseId, TimeSpan.FromDays(5));
+        await RegisterStudentAsync(factory, client, "anna.student@example.com");
+        var before = DateTimeOffset.UtcNow;
+
+        var created = await (await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion }))
+            .Content.ReadFromJsonAsync<StudentBookingResponse>();
+
+        var booking = await factory.GetBookingAsync(created!.BookingId);
+        var userId = await factory.GetUserIdAsync("anna.student@example.com");
+        Assert.Multiple(() =>
+        {
+            Assert.That(booking.TermsVersion, Is.EqualTo(BookingTerms.CurrentVersion));
+            Assert.That(booking.TermsAcceptedAt, Is.GreaterThanOrEqualTo(before));
+            Assert.That(booking.CreatedByUserId, Is.EqualTo(userId));
+            Assert.That(booking.CancelledAt, Is.Null);
+            Assert.That(booking.CancellationReason, Is.Null);
+        });
+    }
+
+    [TestCase(null)]
+    [TestCase("2020-01-01")]
+    public async Task StudentBooking_WhenTermsVersionIsOutdatedOrMissing_ReturnsConflictWithoutBooking(string? termsVersion)
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var courseId = await factory.SeedCourseAsync(CourseType.RiskettanBil);
+        var session = await CreatePublishedSessionAsync(factory, courseId, TimeSpan.FromDays(5));
+        await RegisterStudentAsync(factory, client, "anna.student@example.com");
+
+        var response = await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion });
+        var error = await response.Content.ReadFromJsonAsync<ApiErrorResponse>();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Conflict));
+            Assert.That(error!.Code, Is.EqualTo("TermsVersionOutdated"));
+        });
+        Assert.That(await factory.CountBookingsAsync(session.Id), Is.EqualTo(0));
+    }
+
+    [Test]
+    public async Task StudentCancel_RecordsWhoCancelledAndWhen()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var courseId = await factory.SeedCourseAsync(CourseType.RiskettanBil);
+        var session = await CreatePublishedSessionAsync(factory, courseId, TimeSpan.FromDays(5));
+        await RegisterStudentAsync(factory, client, "anna.student@example.com");
+        var created = await (await client.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion }))
+            .Content.ReadFromJsonAsync<StudentBookingResponse>();
+        var before = DateTimeOffset.UtcNow;
+
+        await client.PostAsync($"/api/student/bookings/{created!.BookingId}/cancel", null);
+
+        var booking = await factory.GetBookingAsync(created.BookingId);
+        var userId = await factory.GetUserIdAsync("anna.student@example.com");
+        Assert.Multiple(() =>
+        {
+            Assert.That(booking.Status, Is.EqualTo(BookingStatus.Cancelled));
+            Assert.That(booking.CancelledAt, Is.GreaterThanOrEqualTo(before));
+            Assert.That(booking.CancelledByUserId, Is.EqualTo(userId));
+            Assert.That(booking.CancellationReason, Is.EqualTo(CancellationReason.StudentOnline));
+            Assert.That(booking.TermsVersion, Is.EqualTo(BookingTerms.CurrentVersion), "Terms acceptance must be kept after cancellation.");
+        });
+    }
+
+    [Test]
+    public async Task AdminDetails_ShowBookingAndLateStaffCancellationHistory()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var studentClient = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var adminClient = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var courseId = await factory.SeedCourseAsync(CourseType.RiskettanBil);
+        var session = await CreatePublishedSessionAsync(factory, courseId, TimeSpan.FromDays(1));
+        await RegisterStudentAsync(factory, studentClient, "anna.student@example.com");
+        var studentBooking = await (await studentClient.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion }))
+            .Content.ReadFromJsonAsync<StudentBookingResponse>();
+        await SignInAsync(factory, adminClient, "admin@example.com", ApplicationRoles.Admin);
+
+        var manual = await adminClient.PostAsJsonAsync($"/api/admin/course-sessions/{session.Id}/bookings", new
+        {
+            firstName = "Bo",
+            lastName = "Berg",
+            phone = "0709999999",
+            email = "bo@example.com",
+        });
+        var cancel = await adminClient.PostAsync($"/api/admin/course-sessions/{session.Id}/bookings/{studentBooking!.BookingId}/cancel", null);
+        var details = await adminClient.GetFromJsonAsync<AdminCourseSessionDetailsResponse>($"/api/admin/course-sessions/{session.Id}");
+        var online = details!.Bookings.Single(x => x.Id == studentBooking.BookingId);
+        var staffBooked = details.Bookings.Single(x => x.Email == "bo@example.com");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(manual.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(cancel.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(online.BookedOnline, Is.True);
+            Assert.That(online.TermsVersion, Is.EqualTo(BookingTerms.CurrentVersion));
+            Assert.That(online.TermsAcceptedAt, Is.Not.Null);
+            Assert.That(online.CancellationReason, Is.EqualTo("Staff"));
+            Assert.That(online.CancelledByName, Is.EqualTo("Test User"));
+            Assert.That(online.CancelledAt, Is.Not.Null);
+            Assert.That(online.IsLateCancellation, Is.True, "Cancelled less than 48 hours before the start.");
+            Assert.That(staffBooked.BookedOnline, Is.False);
+            Assert.That(staffBooked.BookedByName, Is.EqualTo("Test User"));
+            Assert.That(staffBooked.TermsAcceptedAt, Is.Null);
+        });
+    }
+
+    [Test]
+    public async Task AdminDetails_WhenStudentCancelsInTime_IsNotLate()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var studentClient = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var adminClient = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var courseId = await factory.SeedCourseAsync(CourseType.RiskettanBil);
+        var session = await CreatePublishedSessionAsync(factory, courseId, TimeSpan.FromDays(5));
+        await RegisterStudentAsync(factory, studentClient, "anna.student@example.com");
+        var created = await (await studentClient.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion }))
+            .Content.ReadFromJsonAsync<StudentBookingResponse>();
+        await studentClient.PostAsync($"/api/student/bookings/{created!.BookingId}/cancel", null);
+        await SignInAsync(factory, adminClient, "admin@example.com", ApplicationRoles.Admin);
+
+        var details = await adminClient.GetFromJsonAsync<AdminCourseSessionDetailsResponse>($"/api/admin/course-sessions/{session.Id}");
+        var booking = details!.Bookings.Single();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(booking.CancellationReason, Is.EqualTo("StudentOnline"));
+            Assert.That(booking.CancelledByName, Is.EqualTo("Anna Andersson"));
+            Assert.That(booking.IsLateCancellation, Is.False);
+        });
+    }
+
+    [Test]
+    public async Task AdminCancelSession_MarksBookingsAsSessionCancelledAndNotLate()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var studentClient = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var adminClient = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var courseId = await factory.SeedCourseAsync(CourseType.RiskettanBil);
+        var session = await CreatePublishedSessionAsync(factory, courseId, TimeSpan.FromDays(1));
+        await RegisterStudentAsync(factory, studentClient, "anna.student@example.com");
+        var created = await (await studentClient.PostAsJsonAsync($"/api/course-sessions/{session.Id}/bookings", new { termsAccepted = true, termsVersion = BookingTerms.CurrentVersion }))
+            .Content.ReadFromJsonAsync<StudentBookingResponse>();
+        await SignInAsync(factory, adminClient, "admin@example.com", ApplicationRoles.Admin);
+
+        var cancelSession = await adminClient.PostAsync($"/api/admin/course-sessions/{session.Id}/cancel", null);
+        var details = await adminClient.GetFromJsonAsync<AdminCourseSessionDetailsResponse>($"/api/admin/course-sessions/{session.Id}");
+        var booking = details!.Bookings.Single(x => x.Id == created!.BookingId);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(cancelSession.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(booking.CancellationReason, Is.EqualTo("SessionCancelled"));
+            Assert.That(booking.CancelledByName, Is.EqualTo("Test User"));
+            Assert.That(booking.IsLateCancellation, Is.False, "The school cancelling the session is never a late cancellation.");
+        });
+    }
+
+    [Test]
+    public async Task AdminDetails_WhenBookingPredatesAuditFields_ReturnsEmptyHistory()
+    {
+        await using var factory = new ApiWebApplicationFactory();
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var courseId = await factory.SeedCourseAsync(CourseType.RiskettanBil);
+        var session = await CreatePublishedSessionAsync(factory, courseId, TimeSpan.FromDays(5));
+        await factory.AddConfirmedBookingsAsync(session.Id, 1);
+        await SignInAsync(factory, client, "admin@example.com", ApplicationRoles.Admin);
+
+        var details = await client.GetFromJsonAsync<AdminCourseSessionDetailsResponse>($"/api/admin/course-sessions/{session.Id}");
+        var booking = details!.Bookings.Single();
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(booking.Status, Is.EqualTo("Confirmed"));
+            Assert.That(booking.BookedOnline, Is.False);
+            Assert.That(booking.BookedByName, Is.Null);
+            Assert.That(booking.TermsAcceptedAt, Is.Null);
+            Assert.That(booking.CancellationReason, Is.Null);
+            Assert.That(booking.IsLateCancellation, Is.False);
+        });
     }
 
     private static async Task<CourseSession> CreatePublishedSessionAsync(ApiWebApplicationFactory factory, Guid courseId, TimeSpan startsIn)
@@ -1714,7 +1904,24 @@ public class AuthIntegrationTests
         bool IsCancelled,
         AdminBookingResponse[] Bookings);
 
-    private sealed record AdminBookingResponse(Guid Id, string CustomerName, string? FirstName, string? LastName, string Email, string Phone, DateTimeOffset CreatedAt, string Status, bool CountsTowardCapacity);
+    private sealed record AdminBookingResponse(
+        Guid Id,
+        string CustomerName,
+        string? FirstName,
+        string? LastName,
+        string Email,
+        string Phone,
+        DateTimeOffset CreatedAt,
+        string Status,
+        bool CountsTowardCapacity,
+        bool BookedOnline = false,
+        string? BookedByName = null,
+        DateTimeOffset? TermsAcceptedAt = null,
+        string? TermsVersion = null,
+        DateTimeOffset? CancelledAt = null,
+        string? CancellationReason = null,
+        string? CancelledByName = null,
+        bool IsLateCancellation = false);
 
     private static async Task SignInAsync(ApiWebApplicationFactory factory, HttpClient client, string email, string role)
     {
@@ -1861,6 +2068,20 @@ public class AuthIntegrationTests
             }
 
             await dbContext.SaveChangesAsync();
+        }
+
+        public async Task<CourseBooking> GetBookingAsync(Guid bookingId)
+        {
+            using var scope = Services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            return await dbContext.CourseBookings.AsNoTracking().SingleAsync(x => x.Id == bookingId);
+        }
+
+        public async Task<string> GetUserIdAsync(string email)
+        {
+            using var scope = Services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            return await dbContext.Users.Where(x => x.Email == email).Select(x => x.Id).SingleAsync();
         }
 
         public async Task<BookingStatus> GetBookingStatusAsync(Guid bookingId)

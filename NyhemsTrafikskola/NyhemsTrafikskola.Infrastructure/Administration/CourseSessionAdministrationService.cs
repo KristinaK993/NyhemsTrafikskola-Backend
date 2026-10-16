@@ -203,6 +203,7 @@ public sealed class CourseSessionAdministrationService : ICourseSessionAdministr
         string lastName,
         string phone,
         string email,
+        string? bookedByUserId = null,
         CancellationToken cancellationToken = default)
     {
         firstName = ValidateManualBookingText(firstName, "first name", 100);
@@ -286,6 +287,7 @@ public sealed class CourseSessionAdministrationService : ICourseSessionAdministr
             email,
             phone,
             profile.Id);
+        booking.RecordCreatedBy(bookedByUserId);
         booking.Confirm();
         _dbContext.CourseBookings.Add(booking);
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -295,7 +297,7 @@ public sealed class CourseSessionAdministrationService : ICourseSessionAdministr
         return await CreateAdminDetailsAsync(session, existingBookings, cancellationToken);
     }
 
-    public async Task<CourseSessionAdminDetails> CancelBookingAsync(Guid courseSessionId, Guid bookingId, CancellationToken cancellationToken = default)
+    public async Task<CourseSessionAdminDetails> CancelBookingAsync(Guid courseSessionId, Guid bookingId, string? cancelledByUserId = null, CancellationToken cancellationToken = default)
     {
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         var session = await GetLockedSessionAsync(courseSessionId, cancellationToken);
@@ -307,7 +309,7 @@ public sealed class CourseSessionAdministrationService : ICourseSessionAdministr
             throw new InvalidOperationException("Booking was not found for this course session.");
         }
 
-        booking.Cancel();
+        booking.Cancel(CancellationReason.Staff, cancelledByUserId);
         await _dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
@@ -319,7 +321,7 @@ public sealed class CourseSessionAdministrationService : ICourseSessionAdministr
         return await CreateAdminDetailsAsync(session, bookings, cancellationToken);
     }
 
-    public async Task<CourseSessionAdminDetails> CancelCourseSessionAsync(Guid courseSessionId, CancellationToken cancellationToken = default)
+    public async Task<CourseSessionAdminDetails> CancelCourseSessionAsync(Guid courseSessionId, string? cancelledByUserId = null, CancellationToken cancellationToken = default)
     {
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         var session = await GetLockedSessionAsync(courseSessionId, cancellationToken);
@@ -330,7 +332,7 @@ public sealed class CourseSessionAdministrationService : ICourseSessionAdministr
 
         foreach (var booking in bookings.Where(x => x.CountsTowardCapacity(now)))
         {
-            booking.Cancel();
+            booking.Cancel(CancellationReason.SessionCancelled, cancelledByUserId, now);
         }
 
         session.Cancel();
@@ -430,6 +432,19 @@ public sealed class CourseSessionAdministrationService : ICourseSessionAdministr
             .AsNoTracking()
             .Where(x => studentProfileIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, cancellationToken);
+        var actorIds = bookings
+            .SelectMany(x => new[] { x.CreatedByUserId, x.CancelledByUserId })
+            .Where(x => x is not null)
+            .Select(x => x!)
+            .Distinct()
+            .ToArray();
+        var actorNames = await _dbContext.Users
+            .AsNoTracking()
+            .Where(x => actorIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, x => $"{x.FirstName} {x.LastName}".Trim(), cancellationToken);
+
+        string? ActorName(string? userId) =>
+            userId is not null && actorNames.TryGetValue(userId, out var name) ? name : null;
 
         return new CourseSessionAdminDetails(
             session.Id,
@@ -447,7 +462,15 @@ public sealed class CourseSessionAdministrationService : ICourseSessionAdministr
                 x.Phone,
                 x.CreatedAt,
                 x.Status.ToString(),
-                x.CountsTowardCapacity(now))).ToList());
+                x.CountsTowardCapacity(now),
+                x.TermsAcceptedAt.HasValue,
+                ActorName(x.CreatedByUserId),
+                x.TermsAcceptedAt,
+                x.TermsVersion,
+                x.CancelledAt,
+                x.CancellationReason?.ToString(),
+                ActorName(x.CancelledByUserId),
+                x.IsLateCancellation(session.StartTime))).ToList());
     }
 
     private async Task<int> GetActiveBookingCountAsync(Guid courseSessionId, CancellationToken cancellationToken)

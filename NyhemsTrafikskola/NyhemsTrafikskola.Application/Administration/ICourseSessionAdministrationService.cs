@@ -32,9 +32,10 @@ public interface ICourseSessionAdministrationService
         string lastName,
         string phone,
         string email,
+        string? bookedByUserId = null,
         CancellationToken cancellationToken = default);
-    Task<CourseSessionAdminDetails> CancelBookingAsync(Guid courseSessionId, Guid bookingId, CancellationToken cancellationToken = default);
-    Task<CourseSessionAdminDetails> CancelCourseSessionAsync(Guid courseSessionId, CancellationToken cancellationToken = default);
+    Task<CourseSessionAdminDetails> CancelBookingAsync(Guid courseSessionId, Guid bookingId, string? cancelledByUserId = null, CancellationToken cancellationToken = default);
+    Task<CourseSessionAdminDetails> CancelCourseSessionAsync(Guid courseSessionId, string? cancelledByUserId = null, CancellationToken cancellationToken = default);
     Task ArchiveCourseSessionAsync(Guid courseSessionId, CancellationToken cancellationToken = default);
 
     Task DeleteCourseSessionAsync(Guid courseSessionId, CancellationToken cancellationToken = default);
@@ -64,4 +65,12 @@ public sealed record CourseBookingAdminDetails(
     string Phone,
     DateTimeOffset CreatedAt,
     string Status,
-    bool CountsTowardCapacity);
+    bool CountsTowardCapacity,
+    bool BookedOnline,
+    string? BookedByName,
+    DateTimeOffset? TermsAcceptedAt,
+    string? TermsVersion,
+    DateTimeOffset? CancelledAt,
+    string? CancellationReason,
+    string? CancelledByName,
+    bool IsLateCancellation);

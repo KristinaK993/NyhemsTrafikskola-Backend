@@ -45,6 +45,25 @@ public class CourseBooking
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? ExpiresAt { get; private set; }
 
+    // Audit fields. They are null for bookings made before they were introduced.
+    public string? CreatedByUserId { get; private set; }
+    public DateTimeOffset? TermsAcceptedAt { get; private set; }
+    public string? TermsVersion { get; private set; }
+    public DateTimeOffset? CancelledAt { get; private set; }
+    public string? CancelledByUserId { get; private set; }
+    public CancellationReason? CancellationReason { get; private set; }
+
+    public void RecordCreatedBy(string? userId)
+    {
+        CreatedByUserId = string.IsNullOrWhiteSpace(userId) ? null : userId;
+    }
+
+    public void RecordTermsAcceptance(string termsVersion, DateTimeOffset acceptedAt)
+    {
+        TermsVersion = ValidateRequiredText(termsVersion, nameof(termsVersion));
+        TermsAcceptedAt = acceptedAt;
+    }
+
     public bool IsPendingReservationValid(DateTimeOffset? utcNow = null)
     {
         var now = utcNow ?? DateTimeOffset.UtcNow;
@@ -126,7 +145,7 @@ public class CourseBooking
         ExpiresAt = null;
     }
 
-    public void Cancel()
+    public void Cancel(CancellationReason? reason = null, string? cancelledByUserId = null, DateTimeOffset? cancelledAt = null)
     {
         if (Status == BookingStatus.Cancelled)
         {
@@ -135,7 +154,17 @@ public class CourseBooking
 
         Status = BookingStatus.Cancelled;
         ExpiresAt = null;
+        CancelledAt = cancelledAt ?? DateTimeOffset.UtcNow;
+        CancelledByUserId = string.IsNullOrWhiteSpace(cancelledByUserId) ? null : cancelledByUserId;
+        CancellationReason = reason;
     }
+
+    // A cancellation inside the online cancellation window, other than the school cancelling the session, may incur the 50 % fee.
+    public bool IsLateCancellation(DateTimeOffset sessionStartTime) =>
+        Status == BookingStatus.Cancelled
+        && CancelledAt.HasValue
+        && CancellationReason != Domain.CancellationReason.SessionCancelled
+        && CancelledAt.Value > sessionStartTime - CourseSession.OnlineCancellationNotice;
 
     private static string ValidateRequiredText(string value, string parameterName)
     {

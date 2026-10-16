@@ -150,6 +150,7 @@ public sealed class CourseBookingService : ICourseBookingService
         string customerName,
         string email,
         string phone,
+        BookingAudit? audit = null,
         CancellationToken cancellationToken = default)
     {
         if (studentProfileId == Guid.Empty)
@@ -189,6 +190,12 @@ public sealed class CourseBookingService : ICourseBookingService
             email,
             phone,
             studentProfileId);
+
+        booking.RecordCreatedBy(audit?.CreatedByUserId);
+        if (audit?.TermsVersion is not null)
+        {
+            booking.RecordTermsAcceptance(audit.TermsVersion, audit.TermsAcceptedAt ?? DateTimeOffset.UtcNow);
+        }
 
         booking.Confirm();
         _dbContext.CourseBookings.Add(booking);
@@ -254,7 +261,7 @@ public sealed class CourseBookingService : ICourseBookingService
             Math.Max(0, CourseSession.StandardCapacity - occupiedSeats));
     }
 
-    public async Task CancelStudentBookingAsync(Guid bookingId, IReadOnlyCollection<Guid> ownStudentProfileIds, CancellationToken cancellationToken = default)
+    public async Task CancelStudentBookingAsync(Guid bookingId, IReadOnlyCollection<Guid> ownStudentProfileIds, string? cancelledByUserId = null, CancellationToken cancellationToken = default)
     {
         using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
@@ -278,7 +285,7 @@ public sealed class CourseBookingService : ICourseBookingService
             throw new CourseBookingException(CourseBookingError.CancellationDeadlinePassed, "The online cancellation deadline has passed.");
         }
 
-        booking.Cancel();
+        booking.Cancel(CancellationReason.StudentOnline, cancelledByUserId);
         await _dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }

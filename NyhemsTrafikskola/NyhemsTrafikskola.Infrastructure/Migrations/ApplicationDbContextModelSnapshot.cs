@@ -192,14 +192,25 @@ namespace NyhemsTrafikskola.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("CancellationReason")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("CancelledAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CancelledByUserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
                     b.Property<Guid>("CourseSessionId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
-                    b.Property<DateTimeOffset?>("ExpiresAt")
-                        .HasColumnType("datetimeoffset");
+                    b.Property<string>("CreatedByUserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("CustomerName")
                         .IsRequired()
@@ -211,6 +222,9 @@ namespace NyhemsTrafikskola.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<string>("Phone")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -221,6 +235,13 @@ namespace NyhemsTrafikskola.Infrastructure.Migrations
 
                     b.Property<Guid?>("StudentProfileId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("TermsAcceptedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("TermsVersion")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
 
                     b.HasKey("Id");
 
@@ -250,12 +271,12 @@ namespace NyhemsTrafikskola.Infrastructure.Migrations
                     b.Property<DateTimeOffset>("EndTime")
                         .HasColumnType("datetimeoffset");
 
-                    b.Property<bool>("IsCancelled")
+                    b.Property<bool>("IsArchived")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(false);
 
-                    b.Property<bool>("IsArchived")
+                    b.Property<bool>("IsCancelled")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(false);

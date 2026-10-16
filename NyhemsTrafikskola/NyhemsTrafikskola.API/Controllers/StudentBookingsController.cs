@@ -77,7 +77,7 @@ public sealed class StudentBookingsController : ControllerBase
 
         try
         {
-            await _courseBookingService.CancelStudentBookingAsync(bookingId, ownStudentProfileIds, cancellationToken);
+            await _courseBookingService.CancelStudentBookingAsync(bookingId, ownStudentProfileIds, user.Id, cancellationToken);
             return Ok(new { bookingId, status = "Cancelled" });
         }
         catch (CourseBookingException exception)

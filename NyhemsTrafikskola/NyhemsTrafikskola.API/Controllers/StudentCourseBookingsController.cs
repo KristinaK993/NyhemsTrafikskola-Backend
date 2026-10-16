@@ -38,6 +38,12 @@ public sealed class StudentCourseBookingsController : ControllerBase
             return Error(StatusCodes.Status400BadRequest, "TermsNotAccepted", "Du måste godkänna boknings- och avbokningsvillkoren för att kunna boka.");
         }
 
+        // The student must have seen the current terms; an older page could show outdated wording.
+        if (!string.Equals(request.TermsVersion, BookingTerms.CurrentVersion, StringComparison.Ordinal))
+        {
+            return Error(StatusCodes.Status409Conflict, "TermsVersionOutdated", "Boknings- och avbokningsvillkoren har uppdaterats. Ladda om sidan och läs igenom villkoren innan du bokar.");
+        }
+
         var user = await _userManager.GetUserAsync(User);
         if (user is null || !user.IsActive)
         {
@@ -78,6 +84,7 @@ public sealed class StudentCourseBookingsController : ControllerBase
                 customerName,
                 email,
                 phone,
+                new BookingAudit(user.Id, BookingTerms.CurrentVersion, DateTimeOffset.UtcNow),
                 cancellationToken);
 
             return Created(
@@ -103,7 +110,7 @@ public sealed class StudentCourseBookingsController : ControllerBase
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new { code, message });
 
-    public sealed record StudentBookingRequest(bool TermsAccepted);
+    public sealed record StudentBookingRequest(bool TermsAccepted, string? TermsVersion = null);
 
     public sealed record StudentBookingResponse(Guid BookingId, Guid CourseSessionId, string Status, int AvailableSeats);
 }
